@@ -326,6 +326,19 @@ class JellyfinAPI extends ExternalAPI {
 
       return systemInfoResponse;
     } catch (e) {
+      // ApiError only carries a code, so record the underlying failure here.
+      // Without a response this is a transport problem (DNS, refused
+      // connection, or an untrusted TLS certificate), not bad credentials.
+      logger.error(
+        `Something went wrong getting system info from the Jellyfin server: ${e.message}`,
+        {
+          label: 'Jellyfin API',
+          status: e.response?.status,
+          code: e.code,
+          cause: e.cause?.code ?? e.cause?.message,
+        }
+      );
+
       if (!e.response) {
         throw new ApiError(502, ApiErrorCode.ConnectionError);
       }

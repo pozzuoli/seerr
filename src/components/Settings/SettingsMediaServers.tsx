@@ -296,15 +296,17 @@ const SettingsMediaServers = () => {
                   resetForm();
                   revalidate();
                 } catch (e) {
+                  const serverName =
+                    Number(values.serverType) === MediaServerType.EMBY
+                      ? 'Emby'
+                      : 'Jellyfin';
+                  const detail = e?.response?.data?.message;
+
                   addToast(
-                    e?.response?.data?.message ??
-                      intl.formatMessage(messages.connectFailure, {
-                        serverName:
-                          Number(values.serverType) === MediaServerType.EMBY
-                            ? 'Emby'
-                            : 'Jellyfin',
-                      }),
-                    { autoDismiss: true, appearance: 'error' }
+                    `${intl.formatMessage(messages.connectFailure, {
+                      serverName,
+                    })}${detail ? ` ${detail}` : ''}`,
+                    { autoDismiss: false, appearance: 'error' }
                   );
                 }
               }}

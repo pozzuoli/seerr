@@ -279,24 +279,41 @@ settingsRoutes.post('/jellyfin/connect', async (req, res, next) => {
   const bodyResult = jellyfinConnectSchema.safeParse(req.body);
 
   if (!bodyResult.success) {
-    return next({ status: 400, message: 'Invalid request body.' });
+    const issues = bodyResult.error.issues
+      .map((issue) => `${issue.path.join('.') || 'body'}: ${issue.message}`)
+      .join('; ');
+
+    logger.error('Rejected a media server connection request', {
+      label: 'Settings',
+      issues,
+    });
+
+    return next({ status: 400, message: `Invalid request body. ${issues}` });
   }
 
   const body = bodyResult.data;
   const serverName = getMediaServerName(body.serverType);
+
+  const hostname = getHostname({
+    useSsl: body.useSsl,
+    ip: body.hostname,
+    port: body.port,
+    urlBase: body.urlBase,
+  });
+
+  // Logged before anything is attempted so the container log always shows the
+  // URL that was actually tried, which is the usual cause of a failed connect.
+  logger.info(`Connecting to ${serverName} at ${hostname}`, {
+    label: 'Settings',
+    authMethod: body.apiKey ? 'api key' : 'password',
+    username: body.username,
+  });
 
   try {
     const admin = await userRepository.findOneOrFail({
       where: { id: 1 },
       select: ['id', 'email', 'jellyfinUserId'],
       order: { id: 'ASC' },
-    });
-
-    const hostname = getHostname({
-      useSsl: body.useSsl,
-      ip: body.hostname,
-      port: body.port,
-      urlBase: body.urlBase,
     });
 
     // The admin always uses the fixed device id, matching the login flow.
@@ -330,6 +347,12 @@ settingsRoutes.post('/jellyfin/connect', async (req, res, next) => {
       );
 
       if (!matchedUser) {
+        logger.error(`No matching ${serverName} user was found`, {
+          label: 'Settings',
+          username: body.username,
+          availableUsers: users.map((user) => user.Name).join(', '),
+        });
+
         return next({
           status: 404,
           message: `No ${serverName} user named "${body.username}" was found on that server.`,
@@ -369,6 +392,12 @@ settingsRoutes.post('/jellyfin/connect', async (req, res, next) => {
     });
 
     if (conflictingUser && conflictingUser.id !== admin.id) {
+      logger.error(`That ${serverName} account is already linked`, {
+        label: 'Settings',
+        username: jellyfinUser.Name,
+        linkedUserId: conflictingUser.id,
+      });
+
       return next({
         status: 409,
         message: `That ${serverName} account is already linked to another user.`,
@@ -419,15 +448,23 @@ settingsRoutes.post('/jellyfin/connect', async (req, res, next) => {
 
     return res.status(200).json(settings.jellyfin);
   } catch (e) {
+    // ApiError carries no message, only a code, so report both and say which
+    // URL failed. A CONNECTION_ERROR here is usually TLS or DNS rather than
+    // bad credentials.
+    const errorCode = e.errorCode ?? ApiErrorCode.Unknown;
+
     logger.error(`Something went wrong connecting to ${serverName}`, {
       label: 'Settings',
-      errorMessage: e.message,
-      errorCode: e.errorCode,
+      hostname,
+      errorCode,
+      status: e.statusCode ?? e.response?.status,
+      errorMessage: e.message || undefined,
+      cause: e.cause?.message ?? e.cause?.code,
     });
 
     return next({
       status: e.statusCode ?? 500,
-      message: e.errorCode ?? ApiErrorCode.Unknown,
+      message: `${errorCode} (${hostname})`,
     });
   }
 });
