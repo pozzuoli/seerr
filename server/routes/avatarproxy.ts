@@ -2,6 +2,7 @@ import { MediaServerType } from '@server/constants/server';
 import { getRepository } from '@server/datasource';
 import { User } from '@server/entity/User';
 import ImageProxy from '@server/lib/imageproxy';
+import { getJellyfinServerType } from '@server/lib/mediaServers';
 import { getSettings } from '@server/lib/settings';
 import logger from '@server/logger';
 import { getAppVersion } from '@server/utils/appVersion';
@@ -28,7 +29,7 @@ async function initAvatarImageProxy() {
     _avatarImageProxy = new ImageProxy('avatar', '', {
       headers: {
         'X-Emby-Authorization': `MediaBrowser Client="Seerr", Device="Seerr", DeviceId="${deviceId}", Version="${
-          getSettings().main.mediaServerType === MediaServerType.EMBY
+          getJellyfinServerType() === MediaServerType.EMBY
             ? '1.0.0'
             : getAppVersion()
         }", Token="${authToken}"`,
@@ -39,10 +40,9 @@ async function initAvatarImageProxy() {
 }
 
 function getJellyfinAvatarUrl(userId: string) {
-  const settings = getSettings();
-  return settings.main.mediaServerType === MediaServerType.JELLYFIN
-    ? `${getHostname()}/UserImage?UserId=${userId}`
-    : `${getHostname()}/Users/${userId}/Images/Primary?quality=90`;
+  return getJellyfinServerType() === MediaServerType.EMBY
+    ? `${getHostname()}/Users/${userId}/Images/Primary?quality=90`
+    : `${getHostname()}/UserImage?UserId=${userId}`;
 }
 
 function computeImageHash(buffer: Buffer): string {
@@ -69,14 +69,14 @@ export async function checkAvatarChanged(
       return { changed: false };
     }
 
-    const settings = getSettings();
+    const jellyfinServerType = getJellyfinServerType();
     let remoteVersion: string;
-    if (settings.main.mediaServerType === MediaServerType.JELLYFIN) {
+    if (jellyfinServerType === MediaServerType.JELLYFIN) {
       const remoteLastModifiedStr = headResponse.headers['last-modified'] || '';
       remoteVersion = (
         Date.parse(remoteLastModifiedStr) || Date.now()
       ).toString();
-    } else if (settings.main.mediaServerType === MediaServerType.EMBY) {
+    } else if (jellyfinServerType === MediaServerType.EMBY) {
       remoteVersion =
         headResponse.headers['etag']?.replace(/"/g, '') ||
         Date.now().toString();
@@ -118,12 +118,11 @@ export async function checkAvatarChanged(
 router.get('/:jellyfinUserId', async (req, res) => {
   try {
     if (!req.params.jellyfinUserId.match(/^[a-f0-9]{32}$/)) {
-      const mediaServerType = getSettings().main.mediaServerType;
       throw new Error(
         `Provided URL is not ${
-          mediaServerType === MediaServerType.JELLYFIN
-            ? 'a Jellyfin'
-            : 'an Emby'
+          getJellyfinServerType() === MediaServerType.EMBY
+            ? 'an Emby'
+            : 'a Jellyfin'
         } avatar.`
       );
     }

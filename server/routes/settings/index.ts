@@ -4,6 +4,8 @@ import PlexAPI from '@server/api/plexapi';
 import PlexTvAPI from '@server/api/plextv';
 import TautulliAPI from '@server/api/tautulli';
 import { ApiErrorCode } from '@server/constants/error';
+import { MediaServerType } from '@server/constants/server';
+import { UserType } from '@server/constants/user';
 import { getRepository } from '@server/datasource';
 import Media from '@server/entity/Media';
 import { MediaRequest } from '@server/entity/MediaRequest';
@@ -12,12 +14,19 @@ import type { PlexConnection } from '@server/interfaces/api/plexInterfaces';
 import type {
   LogMessage,
   LogsResultsResponse,
+  MediaServerStatus,
   SettingsAboutResponse,
 } from '@server/interfaces/api/settingsInterfaces';
-import { scheduledJobs } from '@server/job/schedule';
+import { scheduledJobs, startJobs } from '@server/job/schedule';
 import type { AvailableCacheIds } from '@server/lib/cache';
 import cacheManager from '@server/lib/cache';
 import ImageProxy from '@server/lib/imageproxy';
+import {
+  disableMediaServer,
+  enableMediaServer,
+  getEnabledMediaServers,
+  getMediaServerName,
+} from '@server/lib/mediaServers';
 import { Permission } from '@server/lib/permissions';
 import { jellyfinFullScanner } from '@server/lib/scanners/jellyfin';
 import { plexFullScanner } from '@server/lib/scanners/plex';
@@ -113,6 +122,249 @@ settingsRoutes.post('/main/regenerate', async (req, res, next) => {
   }
 
   return res.status(200).json(filteredMainSettings(req.user, main));
+});
+
+const mediaServerTypeSchema = z.union([
+  z.literal(MediaServerType.PLEX),
+  z.literal(MediaServerType.JELLYFIN),
+  z.literal(MediaServerType.EMBY),
+]);
+
+const mediaServerToggleSchema = z.object({
+  type: mediaServerTypeSchema,
+  enabled: z.boolean(),
+});
+
+const jellyfinConnectSchema = z.object({
+  serverType: z.union([
+    z.literal(MediaServerType.JELLYFIN),
+    z.literal(MediaServerType.EMBY),
+  ]),
+  hostname: z.string().min(1),
+  port: z.number().int().positive(),
+  urlBase: z.string().optional(),
+  useSsl: z.boolean().optional(),
+  username: z.string().min(1),
+  password: z.string().optional(),
+});
+
+/**
+ * Reports every media server Seerr knows how to talk to, whether it is
+ * currently connected, and whether it has enough configuration to be turned on.
+ */
+settingsRoutes.get('/mediaservers', async (_req, res) => {
+  const settings = getSettings();
+  const userRepository = getRepository(User);
+
+  const admin = await userRepository.findOne({
+    where: { id: 1 },
+    select: ['id', 'plexToken', 'jellyfinUserId'],
+    order: { id: 'ASC' },
+  });
+
+  const enabled = getEnabledMediaServers();
+  const jellyfinConfigured =
+    !!settings.jellyfin.ip && !!settings.jellyfin.apiKey;
+
+  const mediaServers: MediaServerStatus[] = [
+    MediaServerType.PLEX,
+    MediaServerType.JELLYFIN,
+    MediaServerType.EMBY,
+  ].map((type) => {
+    const isJellyfinLike = type !== MediaServerType.PLEX;
+
+    return {
+      type,
+      name: getMediaServerName(type),
+      enabled: enabled.includes(type),
+      isPrimary: settings.main.mediaServerType === type,
+      configured: isJellyfinLike ? jellyfinConfigured : !!settings.plex.ip,
+      linked: isJellyfinLike ? !!admin?.jellyfinUserId : !!admin?.plexToken,
+    };
+  });
+
+  return res.status(200).json(mediaServers);
+});
+
+/**
+ * Connects or disconnects a media server. Seerr supports having Plex and
+ * Jellyfin/Emby connected at the same time, so this only ever changes the one
+ * server named in the request.
+ */
+settingsRoutes.post('/mediaservers', async (req, res, next) => {
+  const settings = getSettings();
+  const userRepository = getRepository(User);
+
+  const bodyResult = mediaServerToggleSchema.safeParse(req.body);
+
+  if (!bodyResult.success) {
+    return next({ status: 400, message: 'Invalid request body.' });
+  }
+
+  const { type, enabled } = bodyResult.data;
+  const serverName = getMediaServerName(type);
+
+  if (!enabled) {
+    if (getEnabledMediaServers().filter((s) => s !== type).length === 0) {
+      return next({
+        status: 400,
+        message: 'At least one media server must stay connected.',
+      });
+    }
+
+    disableMediaServer(type);
+    await settings.save();
+    startJobs();
+
+    logger.info(`Disconnected ${serverName}`, { label: 'Settings' });
+
+    return res.status(200).json({ type, enabled: false });
+  }
+
+  const admin = await userRepository.findOne({
+    where: { id: 1 },
+    select: ['id', 'plexToken', 'jellyfinUserId'],
+    order: { id: 'ASC' },
+  });
+
+  if (type === MediaServerType.PLEX) {
+    if (!admin?.plexToken) {
+      return next({
+        status: 400,
+        message:
+          'Link a Plex account to the admin user before connecting Plex.',
+      });
+    }
+  } else if (!settings.jellyfin.ip || !settings.jellyfin.apiKey) {
+    return next({
+      status: 400,
+      message: `Configure the ${serverName} server before connecting it.`,
+    });
+  } else if (!admin?.jellyfinUserId) {
+    return next({
+      status: 400,
+      message: `Link a ${serverName} account to the admin user before connecting ${serverName}.`,
+    });
+  }
+
+  enableMediaServer(type);
+  await settings.save();
+  startJobs();
+
+  logger.info(`Connected ${serverName}`, { label: 'Settings' });
+
+  return res.status(200).json({ type, enabled: true });
+});
+
+/**
+ * Connects a Jellyfin or Emby server to an install that is already running
+ * (for example one already using Plex). The admin signs in to the new server
+ * so we can mint an API token and link their account to it.
+ */
+settingsRoutes.post('/jellyfin/connect', async (req, res, next) => {
+  const settings = getSettings();
+  const userRepository = getRepository(User);
+
+  const bodyResult = jellyfinConnectSchema.safeParse(req.body);
+
+  if (!bodyResult.success) {
+    return next({ status: 400, message: 'Invalid request body.' });
+  }
+
+  const body = bodyResult.data;
+  const serverName = getMediaServerName(body.serverType);
+
+  try {
+    const admin = await userRepository.findOneOrFail({
+      where: { id: 1 },
+      select: ['id', 'email', 'jellyfinUserId'],
+      order: { id: 'ASC' },
+    });
+
+    const hostname = getHostname({
+      useSsl: body.useSsl,
+      ip: body.hostname,
+      port: body.port,
+      urlBase: body.urlBase,
+    });
+
+    // The admin always uses the fixed device id, matching the login flow.
+    const deviceId = 'BOT_seerr';
+    const jellyfinServer = new JellyfinAPI(hostname, undefined, deviceId);
+
+    const account = await jellyfinServer.login(body.username, body.password);
+
+    if (account.User.Policy.IsAdministrator === false) {
+      throw new ApiError(403, ApiErrorCode.NotAdmin);
+    }
+
+    // Refuse to steal an identity that already belongs to another Seerr user.
+    const conflictingUser = await userRepository.findOne({
+      where: { jellyfinUserId: account.User.Id },
+    });
+
+    if (conflictingUser && conflictingUser.id !== admin.id) {
+      return next({
+        status: 409,
+        message: `That ${serverName} account is already linked to another user.`,
+      });
+    }
+
+    const jellyfinClient = new JellyfinAPI(
+      hostname,
+      account.AccessToken,
+      deviceId
+    );
+    const apiKey = await jellyfinClient.createApiToken('Seerr');
+
+    settings.jellyfin.name = await jellyfinServer.getServerName();
+    settings.jellyfin.serverId = account.User.ServerId;
+    settings.jellyfin.ip = body.hostname;
+    settings.jellyfin.port = body.port;
+    settings.jellyfin.urlBase = body.urlBase ?? '';
+    settings.jellyfin.useSsl = body.useSsl ?? false;
+    settings.jellyfin.apiKey = apiKey;
+
+    // Link the new server to the existing admin user. Their user type stays
+    // untouched so an existing Plex sign-in keeps working.
+    const adminUser = await userRepository.findOneOrFail({
+      where: { id: admin.id },
+    });
+    adminUser.jellyfinUsername = account.User.Name;
+    adminUser.jellyfinUserId = account.User.Id;
+    adminUser.jellyfinDeviceId = deviceId;
+    adminUser.jellyfinAuthToken = account.AccessToken;
+
+    if (adminUser.userType !== UserType.PLEX) {
+      adminUser.userType =
+        body.serverType === MediaServerType.EMBY
+          ? UserType.EMBY
+          : UserType.JELLYFIN;
+    }
+
+    await userRepository.save(adminUser);
+
+    enableMediaServer(body.serverType);
+    await settings.save();
+    startJobs();
+
+    logger.info(`Connected ${serverName} server "${settings.jellyfin.name}"`, {
+      label: 'Settings',
+    });
+
+    return res.status(200).json(settings.jellyfin);
+  } catch (e) {
+    logger.error(`Something went wrong connecting to ${serverName}`, {
+      label: 'Settings',
+      errorMessage: e.message,
+      errorCode: e.errorCode,
+    });
+
+    return next({
+      status: e.statusCode ?? 500,
+      message: e.errorCode ?? ApiErrorCode.Unknown,
+    });
+  }
 });
 
 settingsRoutes.get('/plex', (_req, res) => {

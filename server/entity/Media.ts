@@ -226,6 +226,16 @@ class Media {
   public mediaUrl?: string;
   public mediaUrl4k?: string;
 
+  /**
+   * Per-server deep links. When several media servers are connected the same
+   * item can live on more than one of them, so each gets its own link and
+   * `mediaUrl` points at the primary server's copy.
+   */
+  public plexUrl?: string;
+  public plexUrl4k?: string;
+  public jellyfinUrl?: string;
+  public jellyfinUrl4k?: string;
+
   public iOSPlexUrl?: string;
   public iOSPlexUrl4k?: string;
 
@@ -255,16 +265,18 @@ class Media {
 
   @AfterLoad()
   public setPlexUrls(): void {
-    const { machineId, webAppUrl } = getSettings().plex;
-    const { externalUrl: tautulliUrl } = getSettings().tautulli;
+    const settings = getSettings();
+    const enabledMediaServers = settings.enabledMediaServers;
 
-    if (getSettings().main.mediaServerType == MediaServerType.PLEX) {
+    if (enabledMediaServers.includes(MediaServerType.PLEX)) {
+      const { machineId, webAppUrl } = settings.plex;
+      const { externalUrl: tautulliUrl } = settings.tautulli;
+      const plexWebAppUrl = webAppUrl
+        ? webAppUrl
+        : 'https://app.plex.tv/desktop';
+
       if (this.ratingKey) {
-        this.mediaUrl = `${
-          webAppUrl ? webAppUrl : 'https://app.plex.tv/desktop'
-        }#!/server/${machineId}/details?key=%2Flibrary%2Fmetadata%2F${
-          this.ratingKey
-        }`;
+        this.plexUrl = `${plexWebAppUrl}#!/server/${machineId}/details?key=%2Flibrary%2Fmetadata%2F${this.ratingKey}`;
 
         this.iOSPlexUrl = `plex://preplay/?metadataKey=%2Flibrary%2Fmetadata%2F${this.ratingKey}&server=${machineId}`;
 
@@ -274,11 +286,7 @@ class Media {
       }
 
       if (this.ratingKey4k) {
-        this.mediaUrl4k = `${
-          webAppUrl ? webAppUrl : 'https://app.plex.tv/desktop'
-        }#!/server/${machineId}/details?key=%2Flibrary%2Fmetadata%2F${
-          this.ratingKey4k
-        }`;
+        this.plexUrl4k = `${plexWebAppUrl}#!/server/${machineId}/details?key=%2Flibrary%2Fmetadata%2F${this.ratingKey4k}`;
 
         this.iOSPlexUrl4k = `plex://preplay/?metadataKey=%2Flibrary%2Fmetadata%2F${this.ratingKey4k}&server=${machineId}`;
 
@@ -286,24 +294,40 @@ class Media {
           this.tautulliUrl4k = `${tautulliUrl}/info?rating_key=${this.ratingKey4k}`;
         }
       }
-    } else {
-      const pageName =
-        getSettings().main.mediaServerType == MediaServerType.EMBY
-          ? 'item'
-          : 'details';
-      const { serverId, externalHostname } = getSettings().jellyfin;
+    }
+
+    if (
+      enabledMediaServers.includes(MediaServerType.JELLYFIN) ||
+      enabledMediaServers.includes(MediaServerType.EMBY)
+    ) {
+      const pageName = enabledMediaServers.includes(MediaServerType.EMBY)
+        ? 'item'
+        : 'details';
+      const { serverId, externalHostname } = settings.jellyfin;
       const jellyfinHost =
         externalHostname && externalHostname.length > 0
           ? externalHostname
           : getHostname();
 
       if (this.jellyfinMediaId) {
-        this.mediaUrl = `${jellyfinHost}/web/index.html#!/${pageName}?id=${this.jellyfinMediaId}&context=home&serverId=${serverId}`;
+        this.jellyfinUrl = `${jellyfinHost}/web/index.html#!/${pageName}?id=${this.jellyfinMediaId}&context=home&serverId=${serverId}`;
       }
       if (this.jellyfinMediaId4k) {
-        this.mediaUrl4k = `${jellyfinHost}/web/index.html#!/${pageName}?id=${this.jellyfinMediaId4k}&context=home&serverId=${serverId}`;
+        this.jellyfinUrl4k = `${jellyfinHost}/web/index.html#!/${pageName}?id=${this.jellyfinMediaId4k}&context=home&serverId=${serverId}`;
       }
     }
+
+    // `mediaUrl` is the single link the UI falls back to. Prefer the primary
+    // media server, but use the other one when only it holds the item.
+    const primaryIsPlex =
+      settings.main.mediaServerType === MediaServerType.PLEX;
+
+    this.mediaUrl = primaryIsPlex
+      ? (this.plexUrl ?? this.jellyfinUrl)
+      : (this.jellyfinUrl ?? this.plexUrl);
+    this.mediaUrl4k = primaryIsPlex
+      ? (this.plexUrl4k ?? this.jellyfinUrl4k)
+      : (this.jellyfinUrl4k ?? this.plexUrl4k);
   }
 
   @AfterLoad()

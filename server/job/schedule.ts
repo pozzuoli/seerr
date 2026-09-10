@@ -1,8 +1,8 @@
-import { MediaServerType } from '@server/constants/server';
 import blocklistedTagsProcessor from '@server/job/blocklistedTagsProcessor';
 import availabilitySync from '@server/lib/availabilitySync';
 import downloadTracker from '@server/lib/downloadtracker';
 import ImageProxy from '@server/lib/imageproxy';
+import { isJellyfinEnabled, isPlexEnabled } from '@server/lib/mediaServers';
 import refreshToken from '@server/lib/refreshToken';
 import {
   jellyfinFullScanner,
@@ -32,9 +32,15 @@ export const scheduledJobs: ScheduledJob[] = [];
 
 export const startJobs = (): void => {
   const jobs = getSettings().jobs;
-  const mediaServerType = getSettings().main.mediaServerType;
 
-  if (mediaServerType === MediaServerType.PLEX) {
+  // Jobs are rescheduled whenever a media server is connected or disconnected,
+  // so clear any previous schedule to avoid running each job twice.
+  for (const scheduledJob of scheduledJobs.splice(0)) {
+    scheduledJob.job.cancel();
+  }
+
+  // Plex and Jellyfin/Emby can both be connected, so each block is independent.
+  if (isPlexEnabled()) {
     // Run recently added plex scan every 5 minutes
     scheduledJobs.push({
       id: 'plex-recently-added-scan',
@@ -105,10 +111,9 @@ export const startJobs = (): void => {
         });
       }),
     });
-  } else if (
-    mediaServerType === MediaServerType.JELLYFIN ||
-    mediaServerType === MediaServerType.EMBY
-  ) {
+  }
+
+  if (isJellyfinEnabled()) {
     // Run recently added jellyfin sync every 5 minutes
     scheduledJobs.push({
       id: 'jellyfin-recently-added-scan',
