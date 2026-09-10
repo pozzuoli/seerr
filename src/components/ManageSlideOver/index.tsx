@@ -7,6 +7,9 @@ import Tooltip from '@app/components/Common/Tooltip';
 import DownloadBlock from '@app/components/DownloadBlock';
 import IssueBlock from '@app/components/IssueBlock';
 import RequestBlock from '@app/components/RequestBlock';
+import useMediaServers, {
+  getMediaServerName,
+} from '@app/hooks/useMediaServers';
 import useSettings from '@app/hooks/useSettings';
 import useToasts from '@app/hooks/useToasts';
 import { Permission, useUser } from '@app/hooks/useUser';
@@ -24,7 +27,6 @@ import {
   MediaStatus,
   MediaType,
 } from '@server/constants/media';
-import { MediaServerType } from '@server/constants/server';
 import type { MediaWatchDataResponse } from '@server/interfaces/api/mediaInterfaces';
 import type { DownloadingItem } from '@server/lib/downloadtracker';
 import type { RadarrSettings, SonarrSettings } from '@server/lib/settings';
@@ -114,10 +116,10 @@ const ManageSlideOver = ({
   const intl = useIntl();
   const { addToast } = useToasts();
   const settings = useSettings();
+  const { plexEnabled, enabled: enabledMediaServers } = useMediaServers();
+  // Watch data comes from Tautulli, which only tracks Plex.
   const { data: watchData } = useSWR<MediaWatchDataResponse>(
-    settings.currentSettings.mediaServerType === MediaServerType.PLEX &&
-      data.mediaInfo &&
-      hasPermission(Permission.ADMIN)
+    plexEnabled && data.mediaInfo && hasPermission(Permission.ADMIN)
       ? `/api/v1/media/${data.mediaInfo.id}/watch_data`
       : null
   );
@@ -730,14 +732,9 @@ const ManageSlideOver = ({
                       mediaType: intl.formatMessage(
                         mediaType === 'movie' ? messages.movie : messages.tvshow
                       ),
-                      mediaServerName:
-                        settings.currentSettings.mediaServerType ===
-                        MediaServerType.EMBY
-                          ? 'Emby'
-                          : settings.currentSettings.mediaServerType ===
-                              MediaServerType.PLEX
-                            ? 'Plex'
-                            : 'Jellyfin',
+                      mediaServerName: enabledMediaServers
+                        .map(getMediaServerName)
+                        .join('/'),
                     })}
                   </div>
                 </div>

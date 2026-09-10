@@ -6,6 +6,7 @@ import ConfirmButton from '@app/components/Common/ConfirmButton';
 import Dropdown from '@app/components/Common/Dropdown';
 import PageTitle from '@app/components/Common/PageTitle';
 import LinkJellyfinQuickConnectModal from '@app/components/UserProfile/UserSettings/UserLinkedAccountsSettings/LinkJellyfinQuickConnectModal';
+import useMediaServers from '@app/hooks/useMediaServers';
 import useSettings from '@app/hooks/useSettings';
 import { Permission, UserType, useUser } from '@app/hooks/useUser';
 import globalMessages from '@app/i18n/globalMessages';
@@ -53,6 +54,7 @@ type LinkedAccount = {
 const UserLinkedAccountsSettings = () => {
   const intl = useIntl();
   const settings = useSettings();
+  const { plexEnabled, jellyfinServerType } = useMediaServers();
   const router = useRouter();
   const { user: currentUser } = useUser();
   const {
@@ -125,22 +127,24 @@ const UserLinkedAccountsSettings = () => {
         plexOAuth.preparePopup();
         setTimeout(() => linkPlexAccount(), 1500);
       },
+      // Admins can link Plex before it is connected, since connecting Plex
+      // requires a linked admin account first.
       hide:
-        settings.currentSettings.mediaServerType !== MediaServerType.PLEX ||
+        (!plexEnabled && !hasPermission(Permission.ADMIN)) ||
         accounts.some((a) => a.type === LinkedAccountType.Plex),
     },
     {
       name: 'Jellyfin',
       action: () => setShowJellyfinModal(true),
       hide:
-        settings.currentSettings.mediaServerType !== MediaServerType.JELLYFIN ||
+        jellyfinServerType !== MediaServerType.JELLYFIN ||
         accounts.some((a) => a.type === LinkedAccountType.Jellyfin),
     },
     {
       name: 'Emby',
       action: () => setShowJellyfinModal(true),
       hide:
-        settings.currentSettings.mediaServerType !== MediaServerType.EMBY ||
+        jellyfinServerType !== MediaServerType.EMBY ||
         accounts.some((a) => a.type === LinkedAccountType.Emby),
     },
   ].filter((l) => !l.hide);

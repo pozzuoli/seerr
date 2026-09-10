@@ -1,6 +1,7 @@
 import Alert from '@app/components/Common/Alert';
 import Button from '@app/components/Common/Button';
 import Modal from '@app/components/Common/Modal';
+import useMediaServers from '@app/hooks/useMediaServers';
 import useSettings from '@app/hooks/useSettings';
 import { useUser } from '@app/hooks/useUser';
 import defineMessages from '@app/utils/defineMessages';
@@ -48,6 +49,7 @@ const LinkJellyfinModal = ({
 }: LinkJellyfinModalProps) => {
   const intl = useIntl();
   const settings = useSettings();
+  const { jellyfinServerType } = useMediaServers();
   const { user } = useUser();
   const [error, setError] = useState<string | null>(null);
 
@@ -62,9 +64,7 @@ const LinkJellyfinModal = ({
 
   const applicationName = settings.currentSettings.applicationTitle;
   const mediaServerName =
-    settings.currentSettings.mediaServerType === MediaServerType.EMBY
-      ? 'Emby'
-      : 'Jellyfin';
+    jellyfinServerType === MediaServerType.EMBY ? 'Emby' : 'Jellyfin';
 
   return (
     <Transition
@@ -173,8 +173,7 @@ const LinkJellyfinModal = ({
                     <div className="error">{errors.password}</div>
                   )}
                 </div>
-                {settings.currentSettings.mediaServerType ===
-                  MediaServerType.JELLYFIN && (
+                {jellyfinServerType === MediaServerType.JELLYFIN && (
                   <div className="mt-4">
                     <Button
                       buttonType="ghost"

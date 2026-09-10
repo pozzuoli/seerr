@@ -277,8 +277,9 @@ userSettingsRoutes.post<{ authToken: string }>(
     if (!req.user) {
       return res.status(404).json({ code: ApiErrorCode.Unauthorized });
     }
-    // Make sure Plex is connected
-    if (!isPlexEnabled()) {
+    // Make sure Plex is connected. An admin may also link Plex before it is
+    // connected, since connecting it requires a linked admin account first.
+    if (!isPlexEnabled() && !req.user.hasPermission(Permission.ADMIN)) {
       return res.status(500).json({ message: 'Plex login is disabled' });
     }
 

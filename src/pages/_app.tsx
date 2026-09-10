@@ -253,6 +253,7 @@ CoreApp.getInitialProps = async (initialProps) => {
     streamingRegion: '',
     originalLanguage: '',
     mediaServerType: MediaServerType.NOT_CONFIGURED,
+    enabledMediaServers: [],
     partialRequestsEnabled: true,
     enableSpecialEpisodes: false,
     cacheImages: false,

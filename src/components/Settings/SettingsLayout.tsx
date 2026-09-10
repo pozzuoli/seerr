@@ -1,10 +1,9 @@
 import PageTitle from '@app/components/Common/PageTitle';
 import type { SettingsRoute } from '@app/components/Common/SettingsTabs';
 import SettingsTabs from '@app/components/Common/SettingsTabs';
-import useSettings from '@app/hooks/useSettings';
+import useMediaServers from '@app/hooks/useMediaServers';
 import globalMessages from '@app/i18n/globalMessages';
 import defineMessages from '@app/utils/defineMessages';
-import { MediaServerType } from '@server/constants/server';
 import { useIntl } from 'react-intl';
 
 const messages = defineMessages('components.Settings', {
@@ -12,6 +11,7 @@ const messages = defineMessages('components.Settings', {
   menuUsers: 'Users',
   menuPlexSettings: 'Plex',
   menuJellyfinSettings: '{mediaServerName}',
+  menuMediaServers: 'Media Servers',
   menuServices: 'Services',
   menuNetwork: 'Network',
   menuNotifications: 'Notifications',
@@ -27,7 +27,36 @@ type SettingsLayoutProps = {
 
 const SettingsLayout = ({ children }: SettingsLayoutProps) => {
   const intl = useIntl();
-  const settings = useSettings();
+  const { plexEnabled, jellyfinEnabled, jellyfinName } = useMediaServers();
+
+  // Each connected media server gets its own settings tab, so an install
+  // running Plex alongside Emby can configure both.
+  const mediaServerRoutes: SettingsRoute[] = [
+    {
+      text: intl.formatMessage(messages.menuMediaServers),
+      route: '/settings/mediaservers',
+      regex: /^\/settings\/mediaservers/,
+    },
+  ];
+
+  if (plexEnabled) {
+    mediaServerRoutes.push({
+      text: intl.formatMessage(messages.menuPlexSettings),
+      route: '/settings/plex',
+      regex: /^\/settings\/plex/,
+    });
+  }
+
+  if (jellyfinEnabled) {
+    mediaServerRoutes.push({
+      text: intl.formatMessage(messages.menuJellyfinSettings, {
+        mediaServerName: jellyfinName,
+      }),
+      route: '/settings/jellyfin',
+      regex: /^\/settings\/jellyfin/,
+    });
+  }
+
   const settingsRoutes: SettingsRoute[] = [
     {
       text: intl.formatMessage(messages.menuGeneralSettings),
@@ -39,17 +68,7 @@ const SettingsLayout = ({ children }: SettingsLayoutProps) => {
       route: '/settings/users',
       regex: /^\/settings\/users/,
     },
-    settings.currentSettings.mediaServerType === MediaServerType.PLEX
-      ? {
-          text: intl.formatMessage(messages.menuPlexSettings),
-          route: '/settings/plex',
-          regex: /^\/settings\/plex/,
-        }
-      : {
-          text: getAvailableMediaServerName(),
-          route: '/settings/jellyfin',
-          regex: /^\/settings\/jellyfin/,
-        },
+    ...mediaServerRoutes,
     {
       text: intl.formatMessage(messages.menuServices),
       route: '/settings/services',
@@ -96,16 +115,6 @@ const SettingsLayout = ({ children }: SettingsLayoutProps) => {
       <div className="mt-10 text-white">{children}</div>
     </>
   );
-  function getAvailableMediaServerName() {
-    return intl.formatMessage(messages.menuJellyfinSettings, {
-      mediaServerName:
-        settings.currentSettings.mediaServerType === MediaServerType.JELLYFIN
-          ? 'Jellyfin'
-          : settings.currentSettings.mediaServerType === MediaServerType.EMBY
-            ? 'Emby'
-            : undefined,
-    });
-  }
 };
 
 export default SettingsLayout;

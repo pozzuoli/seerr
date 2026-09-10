@@ -5,12 +5,14 @@ import LoadingSpinner from '@app/components/Common/LoadingSpinner';
 import PageTitle from '@app/components/Common/PageTitle';
 import PermissionEdit from '@app/components/PermissionEdit';
 import QuotaSelector from '@app/components/QuotaSelector';
+import useMediaServers, {
+  getMediaServerName,
+} from '@app/hooks/useMediaServers';
 import useSettings from '@app/hooks/useSettings';
 import useToasts from '@app/hooks/useToasts';
 import globalMessages from '@app/i18n/globalMessages';
 import defineMessages from '@app/utils/defineMessages';
 import { ArrowDownOnSquareIcon } from '@heroicons/react/24/outline';
-import { MediaServerType } from '@server/constants/server';
 import type { MainSettings } from '@server/lib/settings';
 import axios from 'axios';
 import { Field, Form, Formik } from 'formik';
@@ -53,6 +55,7 @@ const SettingsUsers = () => {
     mutate: revalidate,
   } = useSWR<MainSettings>('/api/v1/settings/main');
   const settings = useSettings();
+  const { enabled } = useMediaServers();
 
   const schema = yup
     .object()
@@ -80,14 +83,9 @@ const SettingsUsers = () => {
   }
 
   const mediaServerFormatValues = {
-    mediaServerName:
-      settings.currentSettings.mediaServerType === MediaServerType.JELLYFIN
-        ? 'Jellyfin'
-        : settings.currentSettings.mediaServerType === MediaServerType.EMBY
-          ? 'Emby'
-          : settings.currentSettings.mediaServerType === MediaServerType.PLEX
-            ? 'Plex'
-            : undefined,
+    // With several media servers connected, name them all so the copy reads
+    // correctly for users of either one.
+    mediaServerName: enabled.map(getMediaServerName).join('/') || undefined,
   };
 
   return (

@@ -1,5 +1,5 @@
 import QuickConnectModal from '@app/components/Common/QuickConnectModal';
-import useSettings from '@app/hooks/useSettings';
+import useMediaServers from '@app/hooks/useMediaServers';
 import { useUser } from '@app/hooks/useUser';
 import defineMessages from '@app/utils/defineMessages';
 import { MediaServerType } from '@server/constants/server';
@@ -31,13 +31,11 @@ const LinkJellyfinQuickConnectModal = ({
   onSwitchToPassword,
 }: LinkJellyfinQuickConnectModalProps) => {
   const intl = useIntl();
-  const settings = useSettings();
+  const { jellyfinServerType } = useMediaServers();
   const { user } = useUser();
 
   const mediaServerName =
-    settings.currentSettings.mediaServerType === MediaServerType.JELLYFIN
-      ? 'Jellyfin'
-      : 'Emby';
+    jellyfinServerType === MediaServerType.EMBY ? 'Emby' : 'Jellyfin';
 
   const authenticate = useCallback(
     async (secret: string) => {
