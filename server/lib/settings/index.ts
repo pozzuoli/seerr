@@ -152,7 +152,18 @@ export interface MainSettings {
   blocklistLanguage: string;
   blocklistedTags: string;
   blocklistedTagsLimit: number;
+  /**
+   * The primary media server. Drives UI naming and defaults. Use the helpers in
+   * `@server/lib/mediaServers` instead of comparing against this directly when
+   * you want to know whether a given server is connected.
+   */
   mediaServerType: number;
+  /**
+   * Every media server that is currently connected. Empty on configurations
+   * that predate multi media server support, in which case `mediaServerType`
+   * is the single source of truth.
+   */
+  enabledMediaServers: MediaServerType[];
   partialRequestsEnabled: boolean;
   enableSpecialEpisodes: boolean;
   locale: string;
@@ -204,6 +215,7 @@ interface FullPublicSettings extends PublicSettings {
   streamingRegion: string;
   originalLanguage: string;
   mediaServerType: number;
+  enabledMediaServers: MediaServerType[];
   jellyfinExternalHost?: string;
   jellyfinForgotPasswordUrl?: string;
   jellyfinServerName?: string;
@@ -431,6 +443,7 @@ class Settings {
         blocklistedTags: '',
         blocklistedTagsLimit: 50,
         mediaServerType: MediaServerType.NOT_CONFIGURED,
+        enabledMediaServers: [],
         partialRequestsEnabled: true,
         enableSpecialEpisodes: false,
         locale: 'en',
@@ -732,6 +745,7 @@ class Settings {
       streamingRegion: this.data.main.streamingRegion,
       originalLanguage: this.data.main.originalLanguage,
       mediaServerType: this.main.mediaServerType,
+      enabledMediaServers: this.enabledMediaServers,
       partialRequestsEnabled: this.data.main.partialRequestsEnabled,
       enableSpecialEpisodes: this.data.main.enableSpecialEpisodes,
       cacheImages: this.data.main.cacheImages,
@@ -746,6 +760,26 @@ class Settings {
       versionCheck: this.data.main.versionCheck,
       plexClientIdentifier: this.data.clientId,
     };
+  }
+
+  /**
+   * Every connected media server, falling back to the primary server for
+   * configurations that predate multi media server support. Mirrors
+   * `getEnabledMediaServers()` in `@server/lib/mediaServers`, duplicated here
+   * to keep this module free of a circular import.
+   */
+  get enabledMediaServers(): MediaServerType[] {
+    const enabled = (this.data.main.enabledMediaServers ?? []).filter(
+      (serverType) => serverType !== MediaServerType.NOT_CONFIGURED
+    );
+
+    if (enabled.length > 0) {
+      return [...new Set(enabled)];
+    }
+
+    return this.data.main.mediaServerType !== MediaServerType.NOT_CONFIGURED
+      ? [this.data.main.mediaServerType]
+      : [];
   }
 
   get notifications(): NotificationSettings {

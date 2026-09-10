@@ -11,6 +11,9 @@ import Table from '@app/components/Common/Table';
 import BulkEditModal from '@app/components/UserList/BulkEditModal';
 import PlexImportModal from '@app/components/UserList/PlexImportModal';
 import useDebouncedState from '@app/hooks/useDebouncedState';
+import useMediaServers, {
+  getMediaServerName,
+} from '@app/hooks/useMediaServers';
 import useSettings from '@app/hooks/useSettings';
 import useToasts from '@app/hooks/useToasts';
 import { useUpdateQueryParams } from '@app/hooks/useUpdateQueryParams';
@@ -111,6 +114,7 @@ const UserList = () => {
   const intl = useIntl();
   const router = useRouter();
   const settings = useSettings();
+  const { enabled: enabledMediaServers } = useMediaServers();
   const { addToast } = useToasts();
   const { user: currentUser, hasPermission: currentHasPermission } = useUser();
   const [currentSort, setCurrentSort] = useState<Sort>('created');
@@ -158,7 +162,10 @@ const UserList = () => {
   };
 
   const [isDeleting, setDeleting] = useState(false);
-  const [showImportModal, setShowImportModal] = useState(false);
+  // Which media server's user import is open, if any. With Plex and
+  // Jellyfin/Emby both connected each gets its own import button.
+  const [importModalServer, setImportModalServer] =
+    useState<MediaServerType | null>(null);
   const [deleteModal, setDeleteModal] = useState<{
     isOpen: boolean;
     user?: User;
@@ -620,21 +627,21 @@ const UserList = () => {
         leave="transition-opacity duration-300"
         leaveFrom="opacity-100"
         leaveTo="opacity-0"
-        show={showImportModal}
+        show={!!importModalServer}
       >
-        {settings.currentSettings.mediaServerType === MediaServerType.PLEX ? (
+        {importModalServer === MediaServerType.PLEX ? (
           <PlexImportModal
-            onCancel={() => setShowImportModal(false)}
+            onCancel={() => setImportModalServer(null)}
             onComplete={() => {
-              setShowImportModal(false);
+              setImportModalServer(null);
               revalidate();
             }}
           />
         ) : (
           <JellyfinImportModal
-            onCancel={() => setShowImportModal(false)}
+            onCancel={() => setImportModalServer(null)}
             onComplete={() => {
-              setShowImportModal(false);
+              setImportModalServer(null);
               revalidate();
             }}
           >
@@ -655,28 +662,21 @@ const UserList = () => {
               <UserPlusIcon />
               <span>{intl.formatMessage(messages.createlocaluser)}</span>
             </Button>
-            <Button
-              className="flex-grow lg:mr-2"
-              buttonType="primary"
-              onClick={() => setShowImportModal(true)}
-            >
-              <InboxArrowDownIcon />
-              <span>
-                {settings.currentSettings.mediaServerType ===
-                MediaServerType.EMBY
-                  ? intl.formatMessage(messages.importfrommediaserver, {
-                      mediaServerName: 'Emby',
-                    })
-                  : settings.currentSettings.mediaServerType ===
-                      MediaServerType.PLEX
-                    ? intl.formatMessage(messages.importfrommediaserver, {
-                        mediaServerName: 'Plex',
-                      })
-                    : intl.formatMessage(messages.importfrommediaserver, {
-                        mediaServerName: 'Jellyfin',
-                      })}
-              </span>
-            </Button>
+            {enabledMediaServers.map((serverType) => (
+              <Button
+                key={serverType}
+                className="mb-2 flex-grow sm:mb-0 lg:mr-2"
+                buttonType="primary"
+                onClick={() => setImportModalServer(serverType)}
+              >
+                <InboxArrowDownIcon />
+                <span>
+                  {intl.formatMessage(messages.importfrommediaserver, {
+                    mediaServerName: getMediaServerName(serverType),
+                  })}
+                </span>
+              </Button>
+            ))}
           </div>
           <div className="mb-2 flex flex-grow flex-col gap-2 sm:flex-row lg:mb-0 lg:flex-grow-0">
             <div className="flex flex-grow lg:flex-grow-0">

@@ -3,7 +3,7 @@ import ExternalAPI from '@server/api/externalapi';
 import { ApiErrorCode } from '@server/constants/error';
 import { MediaServerType } from '@server/constants/server';
 import availabilitySync from '@server/lib/availabilitySync';
-import { getSettings } from '@server/lib/settings';
+import { getJellyfinServerType } from '@server/lib/mediaServers';
 import logger from '@server/logger';
 import { ApiError } from '@server/types/error';
 import { getAppVersion } from '@server/utils/appVersion';
@@ -149,16 +149,19 @@ class JellyfinAPI extends ExternalAPI {
     authToken?: string | null,
     deviceId?: string | null
   ) {
-    const settings = getSettings();
     const safeDeviceId =
       deviceId && deviceId.length > 0
         ? deviceId
         : Buffer.from('BOT_seerr').toString('base64');
 
+    // Emby and Jellyfin share this client but differ in a few API details, so
+    // resolve which of the two is actually connected rather than assuming the
+    // primary media server is one of them (it may be Plex).
+    const jellyfinServerType =
+      getJellyfinServerType() ?? MediaServerType.JELLYFIN;
+
     const version =
-      settings.main.mediaServerType === MediaServerType.EMBY
-        ? '1.0.0'
-        : getAppVersion();
+      jellyfinServerType === MediaServerType.EMBY ? '1.0.0' : getAppVersion();
 
     let authHeaderVal = `MediaBrowser Client="Seerr", Device="Seerr", DeviceId="${safeDeviceId}", Version="${version}"`;
     if (authToken) {
@@ -177,7 +180,7 @@ class JellyfinAPI extends ExternalAPI {
       }
     );
 
-    this.mediaServerType = settings.main.mediaServerType;
+    this.mediaServerType = jellyfinServerType;
   }
 
   public async login(

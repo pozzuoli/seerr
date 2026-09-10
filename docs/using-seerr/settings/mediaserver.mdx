@@ -9,6 +9,21 @@ sidebar_position: 3
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
+## Connecting Multiple Media Servers
+
+Seerr can be connected to Plex and Jellyfin/Emby at the same time, so a single instance can serve users on both. Jellyfin and Emby share one connection, so you can pair Plex with either of them, but not with both at once.
+
+The **Settings &rarr; Media Servers** page lists every media server and lets you connect or disconnect each one. One connected server is marked as the *primary* server: it decides which name Seerr shows in its interface and which server media links point at by default.
+
+To add a second media server to an existing install:
+
+- **Adding Jellyfin or Emby:** fill in the connect form on the Media Servers page and sign in with an administrator account on that server. Seerr creates an API key on it and links the account to your admin user.
+- **Adding Plex:** link a Plex account to your admin user under **Settings &rarr; Your Profile &rarr; Linked Accounts** first, then press Connect on the Media Servers page and pick your server under **Settings &rarr; Plex**.
+
+Once both are connected, each server gets its own library scan jobs, users can sign in with either one, and a title is only marked as removed after it goes missing from *every* connected server. Users who exist on both servers can link the second account under **Linked Accounts** so their requests and watch history stay on a single Seerr account.
+
+If you have been running a separate Seerr instance per media server, see [Merging Two Instances](../advanced/merging-instances.mdx) to fold the second instance's requests, issues and watchlists into the one you keep.
+
 <Tabs groupId="media-server-type" queryString>
     <TabItem value="jellyfin" label="Jellyfin">
 :::info

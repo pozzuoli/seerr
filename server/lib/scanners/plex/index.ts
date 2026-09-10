@@ -11,6 +11,7 @@ import type {
 } from '@server/api/themoviedb/interfaces';
 import { getRepository } from '@server/datasource';
 import { User } from '@server/entity/User';
+import { isPlexEnabled } from '@server/lib/mediaServers';
 import type {
   MediaIds,
   ProcessableSeason,
@@ -67,6 +68,11 @@ class PlexScanner
 
   public async run(): Promise<void> {
     const settings = getSettings();
+
+    if (!isPlexEnabled()) {
+      return;
+    }
+
     const sessionId = this.startRun();
     try {
       const userRepository = getRepository(User);

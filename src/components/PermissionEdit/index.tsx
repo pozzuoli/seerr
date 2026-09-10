@@ -1,10 +1,11 @@
 import type { PermissionItem } from '@app/components/PermissionOption';
 import PermissionOption from '@app/components/PermissionOption';
-import useSettings from '@app/hooks/useSettings';
+import useMediaServers, {
+  getMediaServerName,
+} from '@app/hooks/useMediaServers';
 import type { User } from '@app/hooks/useUser';
 import { Permission } from '@app/hooks/useUser';
 import defineMessages from '@app/utils/defineMessages';
-import { MediaServerType } from '@server/constants/server';
 import { useIntl } from 'react-intl';
 
 export const messages = defineMessages('components.PermissionEdit', {
@@ -101,7 +102,10 @@ export const PermissionEdit = ({
   onUpdate,
 }: PermissionEditProps) => {
   const intl = useIntl();
-  const settings = useSettings();
+  const { enabled } = useMediaServers();
+
+  // Watchlist syncing is per media server, so name every connected one.
+  const mediaServerName = enabled.map(getMediaServerName).join('/');
 
   const permissionList: PermissionItem[] = [
     {
@@ -143,22 +147,10 @@ export const PermissionEdit = ({
         {
           id: 'viewwatchlists',
           name: intl.formatMessage(messages.viewwatchlists, {
-            mediaServerName:
-              settings.currentSettings.mediaServerType === MediaServerType.PLEX
-                ? 'Plex'
-                : settings.currentSettings.mediaServerType ===
-                    MediaServerType.JELLYFIN
-                  ? 'Jellyfin'
-                  : 'Emby',
+            mediaServerName,
           }),
           description: intl.formatMessage(messages.viewwatchlistsDescription, {
-            mediaServerName:
-              settings.currentSettings.mediaServerType === MediaServerType.PLEX
-                ? 'Plex'
-                : settings.currentSettings.mediaServerType ===
-                    MediaServerType.JELLYFIN
-                  ? 'Jellyfin'
-                  : 'Emby',
+            mediaServerName,
           }),
           permission: Permission.WATCHLIST_VIEW,
         },

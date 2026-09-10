@@ -1,3 +1,4 @@
+import type { MediaServerType } from '@server/constants/server';
 import type { DnsEntries, DnsStats } from 'dns-caching';
 import type { PaginatedResponse } from './common';
 
@@ -40,6 +41,7 @@ export interface PublicSettingsResponse {
   streamingRegion: string;
   originalLanguage: string;
   mediaServerType: number;
+  enabledMediaServers: MediaServerType[];
   partialRequestsEnabled: boolean;
   enableSpecialEpisodes: boolean;
   cacheImages: boolean;
@@ -51,6 +53,19 @@ export interface PublicSettingsResponse {
   youtubeUrl: string;
   versionCheck: boolean;
   plexClientIdentifier: string;
+}
+
+export interface MediaServerStatus {
+  type: MediaServerType;
+  name: string;
+  /** Whether Seerr currently syncs with and authenticates against this server */
+  enabled: boolean;
+  /** Whether this is the server that drives naming and deep link defaults */
+  isPrimary: boolean;
+  /** Whether connection details for this server have been saved */
+  configured: boolean;
+  /** Whether the admin account holds credentials for this server */
+  linked: boolean;
 }
 
 export interface CacheItem {

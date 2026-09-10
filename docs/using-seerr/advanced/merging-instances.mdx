@@ -1,0 +1,64 @@
+---
+id: merging-instances
+title: Merging Two Instances
+sidebar_label: Merging Two Instances
+description: Fold a second Seerr instance's database into one instance that serves several media servers.
+---
+
+# Merging Two Instances
+
+Seerr can be connected to Plex and Jellyfin/Emby at the same time, so running one instance per media server is no longer necessary. If you already have two instances, `merge-instance` folds the second one's database into the first so you keep both sets of requests, issues and watchlists on a single install.
+
+Nothing in the source database is modified. The merge runs as a dry run until you pass `--apply`, and it is safe to run more than once: a second run finds everything already merged and changes nothing.
+
+## Before You Start
+
+1. Decide which instance survives. Everything merges *into* it, and its data always wins where the two disagree.
+2. **Stop both instances.**
+3. Back up the surviving instance's `config` directory, database included.
+4. Take a **copy** of the other instance's database. Point the command at the copy, never at the live file.
+5. Upgrade the surviving instance to a version that supports multiple media servers, and start it once so its database is on the current schema. Then stop it again.
+
+## Running the Merge
+
+```bash
+pnpm merge-instance --source /path/to/other-db.sqlite3
+```
+
+Run it from the surviving instance, with the same `CONFIG_DIRECTORY` (or database environment variables) it normally uses. For a PostgreSQL source, pass a connection URL instead of a file path:
+
+```bash
+pnpm merge-instance --source postgres://user:password@host:5432/seerr
+```
+
+That first run reports what it would do and writes nothing. When the numbers look right, repeat it with `--apply`:
+
+```bash
+pnpm merge-instance --source /path/to/other-db.sqlite3 --apply
+```
+
+If the source database is from an older Seerr version, add `--migrate-source` to bring the copy up to the current schema first. Only ever do this against a copy.
+
+## What Gets Merged
+
+| Data | How it is matched |
+| --- | --- |
+| Users | Plex ID, then Jellyfin/Emby user ID, then email address |
+| Media | TMDB ID and media type |
+| Seasons | Season number, within matched media |
+| Requests | Media, 4K flag and requesting user |
+| Issues and comments | Media, reporter, issue type and the reported season/episode |
+| Watchlists | TMDB ID, media type and user |
+| Blocklist | TMDB ID and media type |
+
+Someone who exists on both instances ends up as a single account holding both media server identities, so their requests and watchlist stay together. A title that exists on both instances keeps the surviving instance's row and gains the other server's media ID, so it links and plays on either server.
+
+Where two rows disagree on availability, the more available status wins. Anything already present on the surviving instance is left as it is; the merge only ever fills in what is missing.
+
+## Permissions
+
+Users created by the merge get no permissions, so review them under **Settings &rarr; Users** afterwards. Pass `--keep-permissions` to carry their old permissions over instead. Administrator rights are never transferred either way: the surviving instance keeps its own admin.
+
+## After Merging
+
+Start the surviving instance, connect the second media server under **Settings &rarr; Media Servers**, and run a full library scan for it. The scan fills in that server's media IDs for anything the merge could not match.

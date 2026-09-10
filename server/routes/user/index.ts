@@ -17,6 +17,7 @@ import type {
   UserResultsResponse,
   UserWatchDataResponse,
 } from '@server/interfaces/api/userInterfaces';
+import { getJellyfinServerType } from '@server/lib/mediaServers';
 import { Permission, hasPermission } from '@server/lib/permissions';
 import { getSettings } from '@server/lib/settings';
 import logger from '@server/logger';
@@ -787,9 +788,9 @@ router.post(
             permissions: settings.main.defaultPermissions,
             avatar: `/avatarproxy/${jellyfinUser?.Id}`,
             userType:
-              settings.main.mediaServerType === MediaServerType.JELLYFIN
-                ? UserType.JELLYFIN
-                : UserType.EMBY,
+              getJellyfinServerType() === MediaServerType.EMBY
+                ? UserType.EMBY
+                : UserType.JELLYFIN,
           });
 
           await userRepository.save(newUser);

@@ -10,6 +10,12 @@ import type {
   UserSettingsGeneralResponse,
   UserSettingsNotificationsResponse,
 } from '@server/interfaces/api/userSettingsInterfaces';
+import {
+  getJellyfinServerType,
+  isJellyfinEnabled,
+  isMediaServerEnabled,
+  isPlexEnabled,
+} from '@server/lib/mediaServers';
 import { Permission } from '@server/lib/permissions';
 import { getSettings } from '@server/lib/settings';
 import logger from '@server/logger';
@@ -266,14 +272,14 @@ userSettingsRoutes.post<{ authToken: string }>(
   '/linked-accounts/plex',
   isOwnProfile(),
   async (req, res) => {
-    const settings = getSettings();
     const userRepository = getRepository(User);
 
     if (!req.user) {
       return res.status(404).json({ code: ApiErrorCode.Unauthorized });
     }
-    // Make sure Plex login is enabled
-    if (settings.main.mediaServerType !== MediaServerType.PLEX) {
+    // Make sure Plex is connected. An admin may also link Plex before it is
+    // connected, since connecting it requires a linked admin account first.
+    if (!isPlexEnabled() && !req.user.hasPermission(Permission.ADMIN)) {
       return res.status(500).json({ message: 'Plex login is disabled' });
     }
 
@@ -313,11 +319,10 @@ userSettingsRoutes.delete<{ id: string }>(
   '/linked-accounts/plex',
   isOwnProfileOrAdmin(),
   async (req, res) => {
-    const settings = getSettings();
     const userRepository = getRepository(User);
 
-    // Make sure Plex login is enabled
-    if (settings.main.mediaServerType !== MediaServerType.PLEX) {
+    // Make sure Plex is connected
+    if (!isPlexEnabled()) {
       return res.status(500).json({ message: 'Plex login is disabled' });
     }
 
@@ -364,17 +369,13 @@ userSettingsRoutes.post<{ username: string; password: string }>(
   '/linked-accounts/jellyfin',
   isOwnProfile(),
   async (req, res) => {
-    const settings = getSettings();
     const userRepository = getRepository(User);
 
     if (!req.user) {
       return res.status(401).json({ code: ApiErrorCode.Unauthorized });
     }
     // Make sure jellyfin login is enabled
-    if (
-      settings.main.mediaServerType !== MediaServerType.JELLYFIN &&
-      settings.main.mediaServerType !== MediaServerType.EMBY
-    ) {
+    if (!isJellyfinEnabled()) {
       return res
         .status(500)
         .json({ message: 'Jellyfin/Emby login is disabled' });
@@ -429,10 +430,14 @@ userSettingsRoutes.post<{ username: string; password: string }>(
       const user = req.user;
 
       // valid jellyfin user found, link to current user
-      user.userType =
-        settings.main.mediaServerType === MediaServerType.EMBY
-          ? UserType.EMBY
-          : UserType.JELLYFIN;
+      // Only take over the user type when the account has no other media
+      // server identity; a Plex user linking Emby stays a Plex user.
+      if (user.userType !== UserType.PLEX) {
+        user.userType =
+          getJellyfinServerType() === MediaServerType.EMBY
+            ? UserType.EMBY
+            : UserType.JELLYFIN;
+      }
       user.jellyfinUserId = account.User.Id;
       user.jellyfinUsername = account.User.Name;
       user.jellyfinAuthToken = account.AccessToken;
@@ -462,14 +467,10 @@ userSettingsRoutes.delete<{ id: string }>(
   '/linked-accounts/jellyfin',
   isOwnProfileOrAdmin(),
   async (req, res) => {
-    const settings = getSettings();
     const userRepository = getRepository(User);
 
     // Make sure jellyfin login is enabled
-    if (
-      settings.main.mediaServerType !== MediaServerType.JELLYFIN &&
-      settings.main.mediaServerType !== MediaServerType.EMBY
-    ) {
+    if (!isJellyfinEnabled()) {
       return res
         .status(500)
         .json({ message: 'Jellyfin/Emby login is disabled' });
@@ -519,7 +520,6 @@ userSettingsRoutes.post<{ secret: string }>(
   '/linked-accounts/jellyfin/quickconnect',
   isOwnProfile(),
   async (req, res) => {
-    const settings = getSettings();
     const userRepository = getRepository(User);
 
     if (!req.user) {
@@ -533,16 +533,13 @@ userSettingsRoutes.post<{ secret: string }>(
 
     const { secret } = result.data;
 
-    if (
-      settings.main.mediaServerType !== MediaServerType.JELLYFIN &&
-      settings.main.mediaServerType !== MediaServerType.EMBY
-    ) {
+    if (!isJellyfinEnabled()) {
       return res
         .status(500)
         .json({ message: 'Jellyfin/Emby login is disabled' });
     }
 
-    if (settings.main.mediaServerType !== MediaServerType.JELLYFIN) {
+    if (!isMediaServerEnabled(MediaServerType.JELLYFIN)) {
       return res
         .status(403)
         .json({ message: 'Quick Connect is only supported by Jellyfin.' });
