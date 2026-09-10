@@ -1,4 +1,7 @@
-import type { JellyfinLibrary } from '@server/api/jellyfin';
+import type {
+  JellyfinLibrary,
+  JellyfinUserResponse,
+} from '@server/api/jellyfin';
 import JellyfinAPI from '@server/api/jellyfin';
 import PlexAPI from '@server/api/plexapi';
 import PlexTvAPI from '@server/api/plextv';
@@ -135,18 +138,26 @@ const mediaServerToggleSchema = z.object({
   enabled: z.boolean(),
 });
 
-const jellyfinConnectSchema = z.object({
-  serverType: z.union([
-    z.literal(MediaServerType.JELLYFIN),
-    z.literal(MediaServerType.EMBY),
-  ]),
-  hostname: z.string().min(1),
-  port: z.number().int().positive(),
-  urlBase: z.string().optional(),
-  useSsl: z.boolean().optional(),
-  username: z.string().min(1),
-  password: z.string().optional(),
-});
+const jellyfinConnectSchema = z
+  .object({
+    serverType: z.union([
+      z.literal(MediaServerType.JELLYFIN),
+      z.literal(MediaServerType.EMBY),
+    ]),
+    hostname: z.string().min(1),
+    port: z.number().int().positive(),
+    urlBase: z.string().optional(),
+    useSsl: z.boolean().optional(),
+    username: z.string().min(1),
+    password: z.string().optional(),
+    // Supplying an existing API key signs in without a password, which suits
+    // servers where the admin account uses SSO or two-factor authentication.
+    apiKey: z.string().optional(),
+  })
+  .refine((body) => !!body.apiKey || !!body.password, {
+    message: 'Provide either an API key or a password.',
+    path: ['apiKey'],
+  });
 
 /**
  * Reports every media server Seerr knows how to talk to, whether it is
@@ -290,17 +301,71 @@ settingsRoutes.post('/jellyfin/connect', async (req, res, next) => {
 
     // The admin always uses the fixed device id, matching the login flow.
     const deviceId = 'BOT_seerr';
-    const jellyfinServer = new JellyfinAPI(hostname, undefined, deviceId);
 
-    const account = await jellyfinServer.login(body.username, body.password);
+    // The server is not connected yet, so tell the client which of
+    // Jellyfin/Emby it is talking to rather than letting it guess from
+    // settings, which would still be pointing at the other media server.
+    let apiKey: string;
+    let jellyfinUser: JellyfinUserResponse;
+    let accessToken: string | undefined;
 
-    if (account.User.Policy.IsAdministrator === false) {
+    if (body.apiKey) {
+      // Sign in with an existing API key: no password needed, which suits
+      // admin accounts behind SSO or two-factor authentication.
+      apiKey = body.apiKey;
+
+      const jellyfinClient = new JellyfinAPI(
+        hostname,
+        apiKey,
+        deviceId,
+        body.serverType
+      );
+
+      // Fails with InvalidAuthToken if the key is wrong, before anything is saved.
+      await jellyfinClient.getSystemInfo();
+
+      const { users } = await jellyfinClient.getUsers();
+      const matchedUser = users.find(
+        (user) => user.Name.toLowerCase() === body.username.toLowerCase()
+      );
+
+      if (!matchedUser) {
+        return next({
+          status: 404,
+          message: `No ${serverName} user named "${body.username}" was found on that server.`,
+        });
+      }
+
+      jellyfinUser = matchedUser;
+    } else {
+      const jellyfinServer = new JellyfinAPI(
+        hostname,
+        undefined,
+        deviceId,
+        body.serverType
+      );
+
+      const account = await jellyfinServer.login(body.username, body.password);
+
+      jellyfinUser = account.User;
+      accessToken = account.AccessToken;
+
+      const jellyfinClient = new JellyfinAPI(
+        hostname,
+        account.AccessToken,
+        deviceId,
+        body.serverType
+      );
+      apiKey = await jellyfinClient.createApiToken('Seerr');
+    }
+
+    if (jellyfinUser.Policy.IsAdministrator === false) {
       throw new ApiError(403, ApiErrorCode.NotAdmin);
     }
 
     // Refuse to steal an identity that already belongs to another Seerr user.
     const conflictingUser = await userRepository.findOne({
-      where: { jellyfinUserId: account.User.Id },
+      where: { jellyfinUserId: jellyfinUser.Id },
     });
 
     if (conflictingUser && conflictingUser.id !== admin.id) {
@@ -310,15 +375,15 @@ settingsRoutes.post('/jellyfin/connect', async (req, res, next) => {
       });
     }
 
-    const jellyfinClient = new JellyfinAPI(
+    const namedClient = new JellyfinAPI(
       hostname,
-      account.AccessToken,
-      deviceId
+      apiKey,
+      deviceId,
+      body.serverType
     );
-    const apiKey = await jellyfinClient.createApiToken('Seerr');
 
-    settings.jellyfin.name = await jellyfinServer.getServerName();
-    settings.jellyfin.serverId = account.User.ServerId;
+    settings.jellyfin.name = await namedClient.getServerName();
+    settings.jellyfin.serverId = jellyfinUser.ServerId;
     settings.jellyfin.ip = body.hostname;
     settings.jellyfin.port = body.port;
     settings.jellyfin.urlBase = body.urlBase ?? '';
@@ -330,10 +395,10 @@ settingsRoutes.post('/jellyfin/connect', async (req, res, next) => {
     const adminUser = await userRepository.findOneOrFail({
       where: { id: admin.id },
     });
-    adminUser.jellyfinUsername = account.User.Name;
-    adminUser.jellyfinUserId = account.User.Id;
+    adminUser.jellyfinUsername = jellyfinUser.Name;
+    adminUser.jellyfinUserId = jellyfinUser.Id;
     adminUser.jellyfinDeviceId = deviceId;
-    adminUser.jellyfinAuthToken = account.AccessToken;
+    adminUser.jellyfinAuthToken = accessToken ?? adminUser.jellyfinAuthToken;
 
     if (adminUser.userType !== UserType.PLEX) {
       adminUser.userType =

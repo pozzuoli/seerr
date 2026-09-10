@@ -37,6 +37,14 @@ const messages = defineMessages('components.Settings.SettingsMediaServers', {
   enablessl: 'Use SSL',
   username: 'Username',
   password: 'Password',
+  apiKey: 'API Key',
+  authMethod: 'Sign In With',
+  authPassword: 'Password',
+  authApiKey: 'API Key',
+  apiKeyTip:
+    'Create the key on your server under Settings, API Keys. The username tells Seerr which account to link to your admin user.',
+  passwordTip:
+    'Sign in as an administrator. Seerr creates an API key on that server for you.',
   connecting: 'Connecting…',
   toggleSuccess:
     '{serverName} {enabled, select, true {connected} other {disconnected}} successfully!',
@@ -48,6 +56,8 @@ const messages = defineMessages('components.Settings.SettingsMediaServers', {
   validationHostnameRequired: 'You must provide a valid hostname or IP address',
   validationPortRequired: 'You must provide a valid port number',
   validationUsernameRequired: 'You must provide a username',
+  validationPasswordRequired: 'You must provide a password',
+  validationApiKeyRequired: 'You must provide an API key',
   validationUrlBaseLeadingSlash: 'URL base must have a leading slash',
   validationUrlBaseTrailingSlash: 'URL base must not end in a trailing slash',
 });
@@ -123,6 +133,22 @@ const SettingsMediaServers = () => {
     username: Yup.string()
       .nullable()
       .required(intl.formatMessage(messages.validationUsernameRequired)),
+    password: Yup.string().when('authMethod', {
+      is: 'password',
+      then: (schema) =>
+        schema
+          .nullable()
+          .required(intl.formatMessage(messages.validationPasswordRequired)),
+      otherwise: (schema) => schema.nullable(),
+    }),
+    apiKey: Yup.string().when('authMethod', {
+      is: 'apiKey',
+      then: (schema) =>
+        schema
+          .nullable()
+          .required(intl.formatMessage(messages.validationApiKeyRequired)),
+      otherwise: (schema) => schema.nullable(),
+    }),
   });
 
   if (!mediaServers && !error) {
@@ -233,12 +259,14 @@ const SettingsMediaServers = () => {
             <Formik
               initialValues={{
                 serverType: MediaServerType.JELLYFIN,
+                authMethod: 'password',
                 hostname: '',
                 port: 8096,
                 urlBase: '',
                 useSsl: false,
                 username: '',
                 password: '',
+                apiKey: '',
               }}
               validationSchema={ConnectSchema}
               onSubmit={async (values, { resetForm }) => {
@@ -250,7 +278,9 @@ const SettingsMediaServers = () => {
                     urlBase: values.urlBase,
                     useSsl: values.useSsl,
                     username: values.username,
-                    password: values.password,
+                    ...(values.authMethod === 'apiKey'
+                      ? { apiKey: values.apiKey }
+                      : { password: values.password }),
                   });
 
                   addToast(
@@ -279,7 +309,15 @@ const SettingsMediaServers = () => {
                 }
               }}
             >
-              {({ errors, touched, isSubmitting, isValid, handleSubmit }) => (
+              {({
+                errors,
+                touched,
+                isSubmitting,
+                isValid,
+                handleSubmit,
+                values,
+                setFieldValue,
+              }) => (
                 <form className="section" onSubmit={handleSubmit}>
                   <div className="form-row">
                     <label htmlFor="serverType" className="text-label">
@@ -347,7 +385,23 @@ const SettingsMediaServers = () => {
                       {intl.formatMessage(messages.enablessl)}
                     </label>
                     <div className="form-input-area">
-                      <Field type="checkbox" id="useSsl" name="useSsl" />
+                      <Field
+                        type="checkbox"
+                        id="useSsl"
+                        name="useSsl"
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                          const useSsl = e.target.checked;
+                          setFieldValue('useSsl', useSsl);
+
+                          // A server behind a reverse proxy is usually on the
+                          // default HTTPS port rather than Jellyfin's 8096.
+                          if (useSsl && Number(values.port) === 8096) {
+                            setFieldValue('port', 443);
+                          } else if (!useSsl && Number(values.port) === 443) {
+                            setFieldValue('port', 8096);
+                          }
+                        }}
+                      />
                     </div>
                   </div>
                   <div className="form-row">
@@ -364,20 +418,66 @@ const SettingsMediaServers = () => {
                     </div>
                   </div>
                   <div className="form-row">
-                    <label htmlFor="password" className="text-label">
-                      {intl.formatMessage(messages.password)}
+                    <label htmlFor="authMethod" className="text-label">
+                      {intl.formatMessage(messages.authMethod)}
                     </label>
                     <div className="form-input-area">
-                      <div className="form-input-field">
-                        <SensitiveInput
-                          as="field"
-                          id="password"
-                          name="password"
-                          autoComplete="off"
-                        />
-                      </div>
+                      <Field as="select" id="authMethod" name="authMethod">
+                        <option value="password">
+                          {intl.formatMessage(messages.authPassword)}
+                        </option>
+                        <option value="apiKey">
+                          {intl.formatMessage(messages.authApiKey)}
+                        </option>
+                      </Field>
+                      <span className="mt-1 block text-sm text-gray-500">
+                        {intl.formatMessage(
+                          values.authMethod === 'apiKey'
+                            ? messages.apiKeyTip
+                            : messages.passwordTip
+                        )}
+                      </span>
                     </div>
                   </div>
+                  {values.authMethod === 'apiKey' ? (
+                    <div className="form-row">
+                      <label htmlFor="apiKey" className="text-label">
+                        {intl.formatMessage(messages.apiKey)}
+                      </label>
+                      <div className="form-input-area">
+                        <div className="form-input-field">
+                          <SensitiveInput
+                            as="field"
+                            id="apiKey"
+                            name="apiKey"
+                            autoComplete="off"
+                          />
+                        </div>
+                        {errors.apiKey && touched.apiKey && (
+                          <div className="error">{errors.apiKey}</div>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="form-row">
+                      <label htmlFor="password" className="text-label">
+                        {intl.formatMessage(messages.password)}
+                      </label>
+                      <div className="form-input-area">
+                        <div className="form-input-field">
+                          <SensitiveInput
+                            as="field"
+                            id="password"
+                            name="password"
+                            autoComplete="off"
+                          />
+                        </div>
+                        {errors.password && touched.password && (
+                          <div className="error">{errors.password}</div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                   <div className="actions">
                     <div className="flex justify-end">
                       <span className="ml-3 inline-flex rounded-md shadow-sm">
