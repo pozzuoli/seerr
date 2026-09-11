@@ -10,7 +10,7 @@ import MediaRequest from '@server/entity/MediaRequest';
 import Season from '@server/entity/Season';
 import { getSettings } from '@server/lib/settings';
 import logger from '@server/logger';
-import AsyncLock from '@server/utils/asyncLock';
+import { mediaLock } from '@server/utils/asyncLock';
 import { randomUUID } from 'crypto';
 
 // Default scan rates (can be overidden)
@@ -69,7 +69,6 @@ class BaseScanner<T> {
   protected enable4kShow = false;
   protected sessionId: string;
   protected running = false;
-  readonly asyncLock = new AsyncLock();
   readonly tmdb = new TheMovieDb();
 
   protected constructor(
@@ -115,7 +114,7 @@ class BaseScanner<T> {
   ): Promise<void> {
     const mediaRepository = getRepository(Media);
 
-    await this.asyncLock.dispatch(tmdbId, async () => {
+    await mediaLock.dispatch(`${MediaType.MOVIE}:${tmdbId}`, async () => {
       const existing = await this.getExisting(tmdbId, MediaType.MOVIE);
 
       if (existing) {
@@ -289,7 +288,7 @@ class BaseScanner<T> {
   ): Promise<void> {
     const mediaRepository = getRepository(Media);
 
-    await this.asyncLock.dispatch(tmdbId, async () => {
+    await mediaLock.dispatch(`${MediaType.TV}:${tmdbId}`, async () => {
       const media = await this.getExisting(tmdbId, MediaType.TV);
 
       const newSeasons: Season[] = [];
