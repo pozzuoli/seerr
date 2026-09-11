@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { beforeEach, describe, it } from 'node:test';
+import { afterEach, beforeEach, describe, it } from 'node:test';
 
 import type {
   JellyfinLibraryItem,
@@ -1026,6 +1026,90 @@ describe('AvailabilitySync', () => {
         MediaStatus.AVAILABLE,
         'Media on an unreachable Plex must be kept while another server is up'
       );
+    });
+  });
+
+  describe('running the sync', () => {
+    afterEach(() => {
+      availabilitySync.pageSize = 50;
+    });
+
+    async function saveAvailableMovies(tmdbIds: number[]): Promise<Media[]> {
+      return getRepository(Media).save(
+        tmdbIds.map((tmdbId) => {
+          const media = new Media();
+          media.tmdbId = tmdbId;
+          media.mediaType = MediaType.MOVIE;
+          media.status = MediaStatus.AVAILABLE;
+          media.ratingKey = `plex-${tmdbId}`;
+          media.externalServiceId = tmdbId;
+          return media;
+        })
+      );
+    }
+
+    it('checks every title when titles on earlier pages are deleted', async () => {
+      configurePlex();
+      configureRadarr();
+      availabilitySync.pageSize = 1;
+
+      const saved = await saveAvailableMovies([4200, 4201, 4202, 4203]);
+
+      await availabilitySync.run();
+
+      const updated = await getRepository(Media).find({
+        order: { id: 'ASC' },
+      });
+
+      assert.deepEqual(
+        updated.map((media) => [media.tmdbId, media.status]),
+        saved.map((media) => [media.tmdbId, MediaStatus.DELETED]),
+        'Deleting a title must not shift the next page past an unchecked one'
+      );
+    });
+
+    it('ignores a second run while one is in progress', async () => {
+      configurePlex();
+      configureRadarr();
+      await saveAvailableMovies([4300]);
+
+      let release!: () => void;
+      const blocked = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let statusCalls = 0;
+      getStatusImpl = async () => {
+        statusCalls += 1;
+        await blocked;
+        return { MediaContainer: { machineIdentifier: 'test-machine' } };
+      };
+
+      const first = availabilitySync.run();
+      while (statusCalls === 0) {
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+
+      const second = availabilitySync.run();
+      const secondReturned = await Promise.race([
+        second.then(() => true),
+        new Promise<boolean>((resolve) =>
+          setTimeout(() => resolve(false), 200)
+        ),
+      ]);
+
+      try {
+        assert.ok(secondReturned, 'The second run must return straight away');
+        assert.strictEqual(statusCalls, 1, 'Only the first run checks Plex');
+        assert.ok(
+          availabilitySync.running,
+          'The second run must not end the first'
+        );
+      } finally {
+        release();
+        await Promise.all([first, second]);
+      }
+
+      assert.ok(!availabilitySync.running);
     });
   });
 
