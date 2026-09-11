@@ -177,6 +177,8 @@ const MovieDetails = ({ movie }: MovieDetailsProps) => {
     mediaUrl4k: data?.mediaInfo?.mediaUrl4k,
     iOSPlexUrl: data?.mediaInfo?.iOSPlexUrl,
     iOSPlexUrl4k: data?.mediaInfo?.iOSPlexUrl4k,
+    mediaUrlServer: data?.mediaInfo?.mediaUrlServer,
+    mediaUrl4kServer: data?.mediaInfo?.mediaUrl4kServer,
   });
   // The play buttons link to each server that holds the title, so only the
   // Plex one should become a Plex app link on iOS.
@@ -523,6 +525,7 @@ const MovieDetails = ({ movie }: MovieDetailsProps) => {
               tmdbId={data.mediaInfo?.tmdbId}
               mediaType="movie"
               plexUrl={mediaUrl}
+              mediaServerType={data.mediaInfo?.mediaUrlServer}
               serviceUrl={data.mediaInfo?.serviceUrl}
             />
             {settings.currentSettings.movie4kEnabled &&
@@ -547,6 +550,7 @@ const MovieDetails = ({ movie }: MovieDetailsProps) => {
                   tmdbId={data.mediaInfo?.tmdbId}
                   mediaType="movie"
                   plexUrl={mediaUrl4k}
+                  mediaServerType={data.mediaInfo?.mediaUrl4kServer}
                   serviceUrl={data.mediaInfo?.serviceUrl4k}
                 />
               )}
