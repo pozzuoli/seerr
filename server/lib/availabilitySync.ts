@@ -109,7 +109,22 @@ class AvailabilitySync {
       if (plexEnabled) {
         if (admin.plexToken) {
           this.plexClient = new PlexAPI({ plexToken: admin.plexToken });
-          this.plexAvailable = true;
+
+          // Check Plex answers before trusting it, as Jellyfin is checked
+          // below. Otherwise an outage reads as Plex no longer having
+          // anything, and the "nothing reachable" guard cannot see it.
+          try {
+            await this.plexClient.getStatus();
+            this.plexAvailable = true;
+          } catch (e) {
+            logger.error(
+              'Plex is unreachable. Its availability will not be checked.',
+              {
+                label: 'AvailabilitySync',
+                errorMessage: e.message,
+              }
+            );
+          }
         } else {
           logger.error(
             'Plex admin is not configured. Plex availability will not be checked.',
