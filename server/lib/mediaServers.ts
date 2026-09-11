@@ -1,5 +1,10 @@
-import { MediaServerType } from '@server/constants/server';
+import {
+  MediaServerType,
+  resolveEnabledMediaServers,
+} from '@server/constants/server';
+import type { MainSettings } from '@server/lib/settings';
 import { getSettings } from '@server/lib/settings';
+import { isEqual } from 'lodash';
 
 /**
  * Seerr supports connecting to more than one media server at a time (for
@@ -13,27 +18,31 @@ import { getSettings } from '@server/lib/settings';
  * missing or empty.
  */
 
-export const getEnabledMediaServers = (): MediaServerType[] => {
-  const { main } = getSettings();
+export const getEnabledMediaServers = (): MediaServerType[] =>
+  resolveEnabledMediaServers(getSettings().main);
 
-  const enabled = (main.enabledMediaServers ?? []).filter(
-    (serverType) =>
-      serverType === MediaServerType.PLEX ||
-      serverType === MediaServerType.JELLYFIN ||
-      serverType === MediaServerType.EMBY
+const SERVER_FIELDS = ['enabledMediaServers', 'mediaServerType'] as const;
+
+/**
+ * The media server fields a general settings update would change. Connecting
+ * and disconnecting servers goes through `enableMediaServer` and
+ * `disableMediaServer`, which keep the list and the primary consistent, so
+ * `POST /settings/main` refuses to change them. Posting back the current
+ * values is allowed, so a settings round trip keeps working.
+ */
+export const mainSettingsServerFields = (
+  body: unknown,
+  current: Pick<MainSettings, (typeof SERVER_FIELDS)[number]>
+): string[] => {
+  if (!body || typeof body !== 'object') {
+    return [];
+  }
+
+  return SERVER_FIELDS.filter(
+    (field) =>
+      field in body &&
+      !isEqual((body as Record<string, unknown>)[field], current[field])
   );
-
-  if (enabled.length > 0) {
-    return [...new Set(enabled)];
-  }
-
-  // Fall back to the primary server for configurations that predate
-  // multi media server support.
-  if (main.mediaServerType !== MediaServerType.NOT_CONFIGURED) {
-    return [main.mediaServerType];
-  }
-
-  return [];
 };
 
 export const isMediaServerEnabled = (serverType: MediaServerType): boolean =>
