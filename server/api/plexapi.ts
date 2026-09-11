@@ -113,7 +113,10 @@ class PlexAPI extends ExternalAPI {
       baseUrl,
       {},
       {
-        timeout,
+        // Without a timeout a Plex server that stops answering holds scans,
+        // logins and the availability sync until the connection itself
+        // times out, which can take minutes.
+        timeout: timeout ?? settings.network.apiRequestTimeout,
         headers: {
           'X-Plex-Token': plexToken ?? '',
           'X-Plex-Client-Identifier': settings.clientId,
