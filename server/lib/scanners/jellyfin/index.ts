@@ -12,9 +12,14 @@ import type {
   TmdbTvDetails,
   TmdbTvScanDetails,
 } from '@server/api/themoviedb/interfaces';
+import { MediaServerType } from '@server/constants/server';
 import { getRepository } from '@server/datasource';
 import { User } from '@server/entity/User';
-import { isJellyfinEnabled } from '@server/lib/mediaServers';
+import {
+  getJellyfinServerType,
+  getMediaServerName,
+  isJellyfinEnabled,
+} from '@server/lib/mediaServers';
 import type {
   ProcessableSeason,
   RunnableScanner,
@@ -44,6 +49,17 @@ class JellyfinScanner
   constructor({ isRecentOnly }: { isRecentOnly?: boolean } = {}) {
     super('Jellyfin Sync');
     this.isRecentOnly = isRecentOnly ?? false;
+  }
+
+  // One scanner serves Jellyfin and Emby, so name whichever is connected.
+  protected get serverName(): string {
+    return getMediaServerName(
+      getJellyfinServerType() ?? MediaServerType.JELLYFIN
+    );
+  }
+
+  protected get logLabel(): string {
+    return `${this.serverName} Sync`;
   }
 
   private async extractMovieIds(jellyfinitem: JellyfinLibraryItem): Promise<{

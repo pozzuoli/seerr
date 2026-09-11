@@ -19,6 +19,7 @@ import type Season from '@server/entity/Season';
 import { User } from '@server/entity/User';
 import {
   getEnabledMediaServers,
+  getJellyfinServerType,
   getMediaServerName,
   isJellyfinEnabled,
   isPlexEnabled,
@@ -57,6 +58,13 @@ class AvailabilitySync {
 
   /** How many media rows each page of the sync loads. */
   pageSize = 50;
+
+  /** Whichever of Jellyfin/Emby is connected, for log lines. */
+  private get jellyfinName(): string {
+    return getMediaServerName(
+      getJellyfinServerType() ?? MediaServerType.JELLYFIN
+    );
+  }
 
   async run() {
     // A second run would reset the caches and clients the first one is using.
@@ -132,6 +140,7 @@ class AvailabilitySync {
               'Plex is unreachable. Its availability will not be checked.',
               {
                 label: 'AvailabilitySync',
+                server: 'Plex',
                 errorMessage: e.message,
               }
             );
@@ -139,7 +148,7 @@ class AvailabilitySync {
         } else {
           logger.error(
             'Plex admin is not configured. Plex availability will not be checked.',
-            { label: 'AvailabilitySync' }
+            { label: 'AvailabilitySync', server: 'Plex' }
           );
         }
       }
@@ -158,13 +167,10 @@ class AvailabilitySync {
           this.jellyfinAvailable = true;
         } catch (e) {
           logger.error(
-            `${getMediaServerName(
-              enabledMediaServers.includes(MediaServerType.EMBY)
-                ? MediaServerType.EMBY
-                : MediaServerType.JELLYFIN
-            )} is unreachable. Its availability will not be checked.`,
+            `${this.jellyfinName} is unreachable. Its availability will not be checked.`,
             {
               label: 'AvailabilitySync',
+              server: this.jellyfinName,
               status: e.statusCode,
               error: e.name,
               errorMessage: e.errorCode,
@@ -973,6 +979,7 @@ class AvailabilitySync {
           {
             errorMessage: ex.message,
             label: 'AvailabilitySync',
+            server: 'Plex',
           }
         );
       }
@@ -1131,10 +1138,11 @@ class AvailabilitySync {
         logger.debug(
           `Failure retrieving the ${is4k ? '4K' : 'non-4K'} ${
             media.mediaType === 'tv' ? 'show' : 'movie'
-          } [TMDB ID ${media.tmdbId}] from Jellyfin.`,
+          } [TMDB ID ${media.tmdbId}] from ${this.jellyfinName}.`,
           {
             errorMessage: ex.message,
             label: 'AvailabilitySync',
+            server: this.jellyfinName,
           }
         );
       }

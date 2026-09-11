@@ -783,12 +783,28 @@ class BaseScanner<T> {
     );
   }
 
+  /** The label on this scanner's log lines. */
+  protected get logLabel(): string {
+    return this.scannerName;
+  }
+
+  /** The media server this scanner reads, if any, recorded on each log line. */
+  protected get serverName(): string | undefined {
+    return undefined;
+  }
+
   protected log(
     message: string,
     level: 'info' | 'error' | 'debug' | 'warn' = 'debug',
     optional?: Record<string, unknown>
   ): void {
-    logger[level](message, { label: this.scannerName, ...optional });
+    const serverName = this.serverName;
+
+    logger[level](message, {
+      label: this.logLabel,
+      ...(serverName ? { server: serverName } : {}),
+      ...optional,
+    });
   }
 
   get protectedUpdateRate(): number {

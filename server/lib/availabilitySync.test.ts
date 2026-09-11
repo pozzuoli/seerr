@@ -30,6 +30,7 @@ import Season from '@server/entity/Season';
 import { User } from '@server/entity/User';
 import type { RadarrSettings, SonarrSettings } from '@server/lib/settings';
 import { getSettings } from '@server/lib/settings';
+import logger from '@server/logger';
 import { setupTestDb } from '@server/test/db';
 
 // --- Mock JellyfinAPI ---
@@ -1025,6 +1026,34 @@ describe('AvailabilitySync', () => {
         updated.status,
         MediaStatus.AVAILABLE,
         'Media on an unreachable Plex must be kept while another server is up'
+      );
+    });
+
+    it('names the unreachable server in the log', async () => {
+      configurePlex();
+      configureRadarr();
+      getStatusImpl = unreachable;
+
+      const errors: Record<string, unknown>[] = [];
+      const originalError = logger.error;
+      logger.error = ((message: string, meta: Record<string, unknown>) => {
+        errors.push({ message, ...meta });
+        return logger;
+      }) as typeof logger.error;
+
+      try {
+        await availabilitySync.run();
+      } finally {
+        logger.error = originalError;
+      }
+
+      assert.ok(
+        errors.some(
+          (entry) =>
+            String(entry.message).includes('unreachable') &&
+            entry.server === 'Plex'
+        ),
+        'The unreachable error must carry server: Plex'
       );
     });
   });
