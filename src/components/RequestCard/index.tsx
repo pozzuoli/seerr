@@ -76,6 +76,8 @@ const RequestCardError = ({ requestData }: RequestCardErrorProps) => {
     mediaUrl4k: requestData?.media?.mediaUrl4k,
     iOSPlexUrl: requestData?.media?.iOSPlexUrl,
     iOSPlexUrl4k: requestData?.media?.iOSPlexUrl4k,
+    mediaUrlServer: requestData?.media?.mediaUrlServer,
+    mediaUrl4kServer: requestData?.media?.mediaUrl4kServer,
   });
 
   const requestDownloadStatus = getRequestDownloadStatus(
@@ -167,6 +169,11 @@ const RequestCardError = ({ requestData }: RequestCardErrorProps) => {
                       is4k={requestData.is4k}
                       mediaType={requestData.type}
                       plexUrl={requestData.is4k ? plexUrl4k : plexUrl}
+                      mediaServerType={
+                        requestData.is4k
+                          ? requestData.media.mediaUrl4kServer
+                          : requestData.media.mediaUrlServer
+                      }
                       serviceUrl={
                         requestData.is4k
                           ? requestData.media.serviceUrl4k
@@ -260,6 +267,8 @@ const RequestCard = ({ request, onTitleData }: RequestCardProps) => {
     mediaUrl4k: requestData?.media?.mediaUrl4k,
     iOSPlexUrl: requestData?.media?.iOSPlexUrl,
     iOSPlexUrl4k: requestData?.media?.iOSPlexUrl4k,
+    mediaUrlServer: requestData?.media?.mediaUrlServer,
+    mediaUrl4kServer: requestData?.media?.mediaUrl4kServer,
   });
 
   const modifyRequest = async (type: 'approve' | 'decline') => {
@@ -469,6 +478,11 @@ const RequestCard = ({ request, onTitleData }: RequestCardProps) => {
                 tmdbId={requestData.media.tmdbId}
                 mediaType={requestData.type}
                 plexUrl={requestData.is4k ? plexUrl4k : plexUrl}
+                mediaServerType={
+                  requestData.is4k
+                    ? requestData.media.mediaUrl4kServer
+                    : requestData.media.mediaUrlServer
+                }
                 serviceUrl={
                   requestData.is4k
                     ? requestData.media.serviceUrl4k

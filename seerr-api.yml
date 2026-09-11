@@ -2419,6 +2419,12 @@ paths:
                 apiKey:
                   type: string
                   description: Required unless password is supplied.
+                confirmReplace:
+                  type: boolean
+                  description: >-
+                    Confirms connecting a different server from the one
+                    already connected. Its item IDs and library selection
+                    are forgotten.
       responses:
         '200':
           description: 'The server was connected'
@@ -2426,6 +2432,11 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/JellyfinSettings'
+        '409':
+          description: >-
+            The account is already linked to another user, or this is a
+            different server from the one already connected and
+            confirmReplace was not set (message SERVER_REPLACE_UNCONFIRMED).
   /settings/jellyfin:
     get:
       summary: Get Jellyfin settings

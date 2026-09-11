@@ -25,6 +25,10 @@ import type { AvailableCacheIds } from '@server/lib/cache';
 import cacheManager from '@server/lib/cache';
 import ImageProxy from '@server/lib/imageproxy';
 import {
+  forgetJellyfinServer,
+  isDifferentJellyfinServer,
+} from '@server/lib/jellyfinServerChange';
+import {
   disableMediaServer,
   enableMediaServer,
   getEnabledMediaServers,
@@ -153,6 +157,8 @@ const jellyfinConnectSchema = z
     // Supplying an existing API key signs in without a password, which suits
     // servers where the admin account uses SSO or two-factor authentication.
     apiKey: z.string().optional(),
+    // Set once the admin has confirmed replacing a different server.
+    confirmReplace: z.boolean().optional(),
   })
   .refine((body) => !!body.apiKey || !!body.password, {
     message: 'Provide either an API key or a password.',
@@ -322,15 +328,13 @@ settingsRoutes.post('/jellyfin/connect', async (req, res, next) => {
     // The server is not connected yet, so tell the client which of
     // Jellyfin/Emby it is talking to rather than letting it guess from
     // settings, which would still be pointing at the other media server.
-    let apiKey: string;
+    let apiKey = body.apiKey;
     let jellyfinUser: JellyfinUserResponse;
     let accessToken: string | undefined;
 
-    if (body.apiKey) {
+    if (apiKey) {
       // Sign in with an existing API key: no password needed, which suits
       // admin accounts behind SSO or two-factor authentication.
-      apiKey = body.apiKey;
-
       const jellyfinClient = new JellyfinAPI(
         hostname,
         apiKey,
@@ -372,14 +376,6 @@ settingsRoutes.post('/jellyfin/connect', async (req, res, next) => {
 
       jellyfinUser = account.User;
       accessToken = account.AccessToken;
-
-      const jellyfinClient = new JellyfinAPI(
-        hostname,
-        account.AccessToken,
-        deviceId,
-        body.serverType
-      );
-      apiKey = await jellyfinClient.createApiToken('Seerr');
     }
 
     if (jellyfinUser.Policy.IsAdministrator === false) {
@@ -404,6 +400,36 @@ settingsRoutes.post('/jellyfin/connect', async (req, res, next) => {
       });
     }
 
+    // Item IDs belong to the server that issued them, so connecting a
+    // different server means forgetting the old one's. Ask first.
+    const replacesServer = isDifferentJellyfinServer(
+      settings.jellyfin.serverId,
+      jellyfinUser.ServerId
+    );
+
+    if (replacesServer && !body.confirmReplace) {
+      logger.info(`Asked to confirm replacing the ${serverName} server`, {
+        label: 'Settings',
+        hostname,
+      });
+
+      return next({
+        status: 409,
+        message: ApiErrorCode.ServerReplaceUnconfirmed,
+      });
+    }
+
+    // Only create an API key once every check has passed, so a refused
+    // connection does not leave an unused key behind on the server.
+    if (!apiKey) {
+      apiKey = await new JellyfinAPI(
+        hostname,
+        accessToken,
+        deviceId,
+        body.serverType
+      ).createApiToken('Seerr');
+    }
+
     const namedClient = new JellyfinAPI(
       hostname,
       apiKey,
@@ -418,6 +444,15 @@ settingsRoutes.post('/jellyfin/connect', async (req, res, next) => {
     settings.jellyfin.urlBase = body.urlBase ?? '';
     settings.jellyfin.useSsl = body.useSsl ?? false;
     settings.jellyfin.apiKey = apiKey;
+
+    if (replacesServer) {
+      const cleared = await forgetJellyfinServer();
+
+      logger.warn(
+        `Replaced the ${serverName} server and forgot its items on ${cleared} titles. Choose libraries and run a full scan.`,
+        { label: 'Settings', hostname }
+      );
+    }
 
     // Link the new server to the existing admin user. Their user type stays
     // untouched so an existing Plex sign-in keeps working.

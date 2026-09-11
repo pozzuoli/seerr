@@ -4,6 +4,7 @@ import { ApiErrorCode } from '@server/constants/error';
 import { MediaServerType } from '@server/constants/server';
 import availabilitySync from '@server/lib/availabilitySync';
 import { getJellyfinServerType } from '@server/lib/mediaServers';
+import { getSettings } from '@server/lib/settings';
 import logger from '@server/logger';
 import { ApiError } from '@server/types/error';
 import { getAppVersion } from '@server/utils/appVersion';
@@ -140,9 +141,24 @@ export interface JellyfinItemsReponse {
   StartIndex: number;
 }
 
+// How long one server health check stands during an availability sync.
+const HEALTH_CHECK_TTL = 30 * 1000;
+
+// A whole library comes back in a single request, which on a large library
+// takes far longer than an ordinary call.
+const LIBRARY_LISTING_TIMEOUT = 10 * 60 * 1000;
+
+const libraryListingTimeout = (): number => {
+  const timeout = getSettings().network.apiRequestTimeout;
+
+  // 0 means the admin turned timeouts off, so keep it that way.
+  return timeout === 0 ? 0 : Math.max(timeout, LIBRARY_LISTING_TIMEOUT);
+};
+
 class JellyfinAPI extends ExternalAPI {
   private userId?: string;
   private mediaServerType: MediaServerType;
+  private serverHealth?: { healthy: boolean; checkedAt: number };
 
   constructor(
     jellyfinHost: string,
@@ -175,6 +191,10 @@ class JellyfinAPI extends ExternalAPI {
       jellyfinHost,
       {},
       {
+        // Without a timeout a server that stops answering holds scans,
+        // logins and the availability sync until the connection itself
+        // times out, which can take minutes.
+        timeout: getSettings().network.apiRequestTimeout,
         headers: {
           Authorization: authHeaderVal,
           'Content-Type': 'application/json',
@@ -468,7 +488,8 @@ class JellyfinAPI extends ExternalAPI {
   public async getLibraryContents(id: string): Promise<JellyfinLibraryItem[]> {
     try {
       const libraryItemsResponse = await this.get<any>(
-        `/Items?SortBy=SortName&SortOrder=Ascending&IncludeItemTypes=Series,Movie,Others&Recursive=true&StartIndex=0&ParentId=${id}&collapseBoxSetItems=false`
+        `/Items?SortBy=SortName&SortOrder=Ascending&IncludeItemTypes=Series,Movie,Others&Recursive=true&StartIndex=0&ParentId=${id}&collapseBoxSetItems=false`,
+        { timeout: libraryListingTimeout() }
       );
 
       return libraryItemsResponse.Items.filter(
@@ -530,10 +551,17 @@ class JellyfinAPI extends ExternalAPI {
 
       return itemResponse.Items?.[0];
     } catch (e) {
-      if (availabilitySync.running) {
-        if (e.response?.status === 500) {
+      // During an availability sync some servers answer a deleted item with a
+      // 500, so it has long been read as "gone". A struggling server returns
+      // 500 for everything, though, so only trust it while the server itself
+      // still responds. Otherwise report a connection error, which the sync
+      // treats as "still exists".
+      if (availabilitySync.running && e.response?.status === 500) {
+        if (await this.isServerHealthy()) {
           return undefined;
         }
+
+        throw new ApiError(502, ApiErrorCode.ConnectionError);
       }
 
       logger.error(
@@ -546,6 +574,33 @@ class JellyfinAPI extends ExternalAPI {
 
       throw new ApiError(e.response.status, ApiErrorCode.InvalidAuthToken);
     }
+  }
+
+  /**
+   * Whether the server itself is responding. The answer is kept briefly, so a
+   * run of failing items costs one extra request rather than one each.
+   */
+  private async isServerHealthy(): Promise<boolean> {
+    const now = Date.now();
+
+    if (
+      this.serverHealth &&
+      now - this.serverHealth.checkedAt < HEALTH_CHECK_TTL
+    ) {
+      return this.serverHealth.healthy;
+    }
+
+    let healthy = true;
+
+    try {
+      await this.getSystemInfo();
+    } catch {
+      healthy = false;
+    }
+
+    this.serverHealth = { healthy, checkedAt: now };
+
+    return healthy;
   }
 
   public async getSeasons(seriesID: string): Promise<JellyfinLibraryItem[]> {

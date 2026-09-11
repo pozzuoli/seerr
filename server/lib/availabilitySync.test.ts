@@ -116,6 +116,18 @@ Object.defineProperty(PlexAPI.prototype, 'getChildrenMetadata', {
   configurable: true,
 });
 
+let getStatusImpl: () => Promise<unknown> = async () => ({
+  MediaContainer: { machineIdentifier: 'test-machine' },
+});
+
+Object.defineProperty(PlexAPI.prototype, 'getStatus', {
+  get() {
+    return async () => getStatusImpl();
+  },
+  set() {},
+  configurable: true,
+});
+
 // --- Mock SonarrAPI ---
 let getSeriesByIdImpl: (id: number) => Promise<SonarrSeries> = async () => {
   throw new Error('404');
@@ -432,6 +444,12 @@ describe('AvailabilitySync', () => {
       throw new Error('404');
     };
     getChildrenMetadataImpl = async () => [];
+    getStatusImpl = async () => ({
+      MediaContainer: { machineIdentifier: 'test-machine' },
+    });
+    // configurePlex/configureJellyfin pick a server through the fallback to
+    // the primary one, which only applies while this list is empty.
+    getSettings().main.enabledMediaServers = [];
     getSeriesByIdImpl = async () => {
       throw new Error('404');
     };
@@ -944,6 +962,69 @@ describe('AvailabilitySync', () => {
         updated.status,
         MediaStatus.PARTIALLY_AVAILABLE,
         'Show should be PARTIALLY_AVAILABLE when some seasons are available and some are unknown'
+      );
+    });
+  });
+
+  describe('Plex reachability', () => {
+    const unreachable = async () => {
+      throw Object.assign(new Error('connect ECONNREFUSED'), {
+        code: 'ECONNREFUSED',
+      });
+    };
+
+    async function saveAvailableMovie(tmdbId: number): Promise<Media> {
+      const media = new Media();
+      media.tmdbId = tmdbId;
+      media.mediaType = MediaType.MOVIE;
+      media.status = MediaStatus.AVAILABLE;
+      media.ratingKey = `plex-${tmdbId}`;
+      media.externalServiceId = tmdbId;
+
+      return getRepository(Media).save(media);
+    }
+
+    it('stops the sync instead of removing media when Plex is the only server and is unreachable', async () => {
+      configurePlex();
+      configureRadarr();
+      getStatusImpl = unreachable;
+
+      const media = await saveAvailableMovie(3000);
+
+      await availabilitySync.run();
+
+      const updated = await getRepository(Media).findOneOrFail({
+        where: { id: media.id },
+      });
+
+      assert.strictEqual(
+        updated.status,
+        MediaStatus.AVAILABLE,
+        'An unreachable Plex must not be read as Plex no longer having the movie'
+      );
+    });
+
+    it('keeps media that only Plex has while Plex is unreachable and Jellyfin is up', async () => {
+      configureJellyfin();
+      getSettings().main.enabledMediaServers = [
+        MediaServerType.PLEX,
+        MediaServerType.JELLYFIN,
+      ];
+      configureRadarr();
+      getStatusImpl = unreachable;
+
+      const media = await saveAvailableMovie(3001);
+
+      await availabilitySync.run();
+
+      const updated = await getRepository(Media).findOneOrFail({
+        where: { id: media.id },
+      });
+
+      assert.strictEqual(
+        updated.status,
+        MediaStatus.AVAILABLE,
+        'Media on an unreachable Plex must be kept while another server is up'
       );
     });
   });

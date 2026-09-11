@@ -8,7 +8,9 @@ import IssueComment from '@app/components/IssueDetails/IssueComment';
 import IssueDescription from '@app/components/IssueDetails/IssueDescription';
 import { issueOptions } from '@app/components/IssueModal/constants';
 import useDeepLinks from '@app/hooks/useDeepLinks';
-import useMediaServers from '@app/hooks/useMediaServers';
+import useMediaServers, {
+  getMediaServerName,
+} from '@app/hooks/useMediaServers';
 import useToasts from '@app/hooks/useToasts';
 import { Permission, useUser } from '@app/hooks/useUser';
 import globalMessages from '@app/i18n/globalMessages';
@@ -96,6 +98,8 @@ const IssueDetails = () => {
     mediaUrl4k: data?.mediaInfo?.mediaUrl4k,
     iOSPlexUrl: data?.mediaInfo?.iOSPlexUrl,
     iOSPlexUrl4k: data?.mediaInfo?.iOSPlexUrl4k,
+    mediaUrlServer: data?.mediaInfo?.mediaUrlServer,
+    mediaUrl4kServer: data?.mediaInfo?.mediaUrl4kServer,
   });
 
   const CommentSchema = Yup.object().shape({
@@ -106,6 +110,14 @@ const IssueDetails = () => {
     (opt) => opt.issueType === issueData?.issueType
   );
   const { primaryName } = useMediaServers();
+  // Name each play link after the server it opens, which is not always the
+  // primary one.
+  const linkServerName = data?.mediaInfo?.mediaUrlServer
+    ? getMediaServerName(data.mediaInfo.mediaUrlServer)
+    : primaryName;
+  const linkServerName4k = data?.mediaInfo?.mediaUrl4kServer
+    ? getMediaServerName(data.mediaInfo.mediaUrl4kServer)
+    : primaryName;
 
   if (!data && !error) {
     return <LoadingSpinner />;
@@ -382,7 +394,7 @@ const IssueDetails = () => {
                   <PlayIcon />
                   <span>
                     {intl.formatMessage(messages.playonplex, {
-                      mediaServerName: primaryName,
+                      mediaServerName: linkServerName,
                     })}
                   </span>
                 </Button>
@@ -420,7 +432,7 @@ const IssueDetails = () => {
                   <PlayIcon />
                   <span>
                     {intl.formatMessage(messages.play4konplex, {
-                      mediaServerName: primaryName,
+                      mediaServerName: linkServerName4k,
                     })}
                   </span>
                 </Button>
@@ -628,7 +640,7 @@ const IssueDetails = () => {
                 <PlayIcon />
                 <span>
                   {intl.formatMessage(messages.playonplex, {
-                    mediaServerName: primaryName,
+                    mediaServerName: linkServerName,
                   })}
                 </span>
               </Button>
@@ -665,7 +677,7 @@ const IssueDetails = () => {
                 <PlayIcon />
                 <span>
                   {intl.formatMessage(messages.play4konplex, {
-                    mediaServerName: primaryName,
+                    mediaServerName: linkServerName4k,
                   })}
                 </span>
               </Button>

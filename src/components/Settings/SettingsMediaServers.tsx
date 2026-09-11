@@ -2,14 +2,17 @@ import Alert from '@app/components/Common/Alert';
 import Badge from '@app/components/Common/Badge';
 import Button from '@app/components/Common/Button';
 import LoadingSpinner from '@app/components/Common/LoadingSpinner';
+import Modal from '@app/components/Common/Modal';
 import SensitiveInput from '@app/components/Common/SensitiveInput';
 import useToasts from '@app/hooks/useToasts';
 import defineMessages from '@app/utils/defineMessages';
+import { Transition } from '@headlessui/react';
+import { ApiErrorCode } from '@server/constants/error';
 import { MediaServerType } from '@server/constants/server';
 import type { MediaServerStatus } from '@server/interfaces/api/settingsInterfaces';
 import axios from 'axios';
 import { Field, Formik } from 'formik';
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { useIntl } from 'react-intl';
 import useSWR from 'swr';
 import * as Yup from 'yup';
@@ -60,12 +63,26 @@ const messages = defineMessages('components.Settings.SettingsMediaServers', {
   validationApiKeyRequired: 'You must provide an API key',
   validationUrlBaseLeadingSlash: 'URL base must have a leading slash',
   validationUrlBaseTrailingSlash: 'URL base must not end in a trailing slash',
+  replaceTitle: 'Replace the {serverName} Server?',
+  replaceDescription:
+    'This is a different {serverName} server from the one Seerr was connected to before. Connecting it forgets the items and library selection Seerr kept for the old server, so choose libraries and run a full scan afterwards. Linked user accounts are not changed.',
+  replaceConfirm: 'Replace Server',
+  replacing: 'Replacing…',
+  setUpPlex: 'Set Up Plex',
 });
 
 const SettingsMediaServers = () => {
   const intl = useIntl();
   const { addToast } = useToasts();
   const [isUpdating, setIsUpdating] = useState(false);
+  // Set when connecting would replace a different Jellyfin/Emby server, which
+  // the admin has to confirm first.
+  const [pendingReplace, setPendingReplace] = useState<{
+    payload: Record<string, unknown>;
+    serverName: string;
+    onConnected: () => void;
+  } | null>(null);
+  const [isReplacing, setIsReplacing] = useState(false);
 
   const {
     data: mediaServers,
@@ -108,6 +125,43 @@ const SettingsMediaServers = () => {
       );
     } finally {
       setIsUpdating(false);
+    }
+  };
+
+  const confirmReplace = async () => {
+    if (!pendingReplace) {
+      return;
+    }
+
+    setIsReplacing(true);
+
+    try {
+      await axios.post('/api/v1/settings/jellyfin/connect', {
+        ...pendingReplace.payload,
+        confirmReplace: true,
+      });
+
+      addToast(
+        intl.formatMessage(messages.connectSuccess, {
+          serverName: pendingReplace.serverName,
+        }),
+        { autoDismiss: true, appearance: 'success' }
+      );
+
+      pendingReplace.onConnected();
+      revalidate();
+    } catch (e) {
+      const detail = e?.response?.data?.message;
+
+      addToast(
+        `${intl.formatMessage(messages.connectFailure, {
+          serverName: pendingReplace.serverName,
+        })}${detail ? ` ${detail}` : ''}`,
+        { autoDismiss: false, appearance: 'error' }
+      );
+    } finally {
+      setIsReplacing(false);
+      setPendingReplace(null);
     }
   };
 
@@ -220,13 +274,27 @@ const SettingsMediaServers = () => {
                       {intl.formatMessage(messages.disconnect)}
                     </Button>
                   ) : (
-                    <Button
-                      buttonType="primary"
-                      disabled={isUpdating || !canEnable}
-                      onClick={() => toggleServer(server, true)}
-                    >
-                      {intl.formatMessage(messages.connect)}
-                    </Button>
+                    <div className="flex gap-2">
+                      {/* The Plex settings tab only appears once Plex is
+                          connected, but connecting needs it set up first. */}
+                      {server.type === MediaServerType.PLEX &&
+                        !server.configured && (
+                          <Button
+                            as="a"
+                            href="/settings/plex"
+                            buttonType="ghost"
+                          >
+                            {intl.formatMessage(messages.setUpPlex)}
+                          </Button>
+                        )}
+                      <Button
+                        buttonType="primary"
+                        disabled={isUpdating || !canEnable}
+                        onClick={() => toggleServer(server, true)}
+                      >
+                        {intl.formatMessage(messages.connect)}
+                      </Button>
+                    </div>
                   )}
                 </div>
               </li>
@@ -270,25 +338,31 @@ const SettingsMediaServers = () => {
               }}
               validationSchema={ConnectSchema}
               onSubmit={async (values, { resetForm }) => {
+                const serverName =
+                  Number(values.serverType) === MediaServerType.EMBY
+                    ? 'Emby'
+                    : 'Jellyfin';
+                const payload = {
+                  serverType: Number(values.serverType),
+                  hostname: values.hostname,
+                  port: Number(values.port),
+                  urlBase: values.urlBase,
+                  useSsl: values.useSsl,
+                  username: values.username,
+                  ...(values.authMethod === 'apiKey'
+                    ? { apiKey: values.apiKey }
+                    : { password: values.password }),
+                };
+
                 try {
-                  await axios.post('/api/v1/settings/jellyfin/connect', {
-                    serverType: Number(values.serverType),
-                    hostname: values.hostname,
-                    port: Number(values.port),
-                    urlBase: values.urlBase,
-                    useSsl: values.useSsl,
-                    username: values.username,
-                    ...(values.authMethod === 'apiKey'
-                      ? { apiKey: values.apiKey }
-                      : { password: values.password }),
-                  });
+                  await axios.post(
+                    '/api/v1/settings/jellyfin/connect',
+                    payload
+                  );
 
                   addToast(
                     intl.formatMessage(messages.connectSuccess, {
-                      serverName:
-                        Number(values.serverType) === MediaServerType.EMBY
-                          ? 'Emby'
-                          : 'Jellyfin',
+                      serverName,
                     }),
                     { autoDismiss: true, appearance: 'success' }
                   );
@@ -296,10 +370,21 @@ const SettingsMediaServers = () => {
                   resetForm();
                   revalidate();
                 } catch (e) {
-                  const serverName =
-                    Number(values.serverType) === MediaServerType.EMBY
-                      ? 'Emby'
-                      : 'Jellyfin';
+                  // A different server from the one connected before: ask
+                  // before forgetting what Seerr kept for the old one.
+                  if (
+                    e?.response?.status === 409 &&
+                    e?.response?.data?.message ===
+                      ApiErrorCode.ServerReplaceUnconfirmed
+                  ) {
+                    setPendingReplace({
+                      payload,
+                      serverName,
+                      onConnected: () => resetForm(),
+                    });
+                    return;
+                  }
+
                   const detail = e?.response?.data?.message;
 
                   addToast(
@@ -501,6 +586,34 @@ const SettingsMediaServers = () => {
           </div>
         </>
       )}
+
+      <Transition
+        as={Fragment}
+        enter="transition-opacity duration-300"
+        enterFrom="opacity-0"
+        enterTo="opacity-100"
+        leave="transition-opacity duration-300"
+        leaveFrom="opacity-100"
+        leaveTo="opacity-0"
+        show={!!pendingReplace}
+      >
+        <Modal
+          title={intl.formatMessage(messages.replaceTitle, {
+            serverName: pendingReplace?.serverName ?? '',
+          })}
+          okText={intl.formatMessage(
+            isReplacing ? messages.replacing : messages.replaceConfirm
+          )}
+          okButtonType="danger"
+          okDisabled={isReplacing}
+          onOk={() => confirmReplace()}
+          onCancel={() => setPendingReplace(null)}
+        >
+          {intl.formatMessage(messages.replaceDescription, {
+            serverName: pendingReplace?.serverName ?? '',
+          })}
+        </Modal>
+      </Transition>
     </>
   );
 };

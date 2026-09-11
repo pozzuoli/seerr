@@ -51,4 +51,11 @@ class AsyncLock {
   };
 }
 
+/**
+ * Shared by every media scanner. Each scanner is its own instance, and with
+ * Plex and Jellyfin/Emby connected their scans run at the same time, so a
+ * lock per scanner would let two of them create the same title twice.
+ */
+export const mediaLock = new AsyncLock();
+
 export default AsyncLock;

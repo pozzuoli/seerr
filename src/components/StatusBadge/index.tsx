@@ -2,12 +2,15 @@ import Spinner from '@app/assets/spinner.svg';
 import Badge from '@app/components/Common/Badge';
 import Tooltip from '@app/components/Common/Tooltip';
 import DownloadBlock from '@app/components/DownloadBlock';
-import useMediaServers from '@app/hooks/useMediaServers';
+import useMediaServers, {
+  getMediaServerName,
+} from '@app/hooks/useMediaServers';
 import useSettings from '@app/hooks/useSettings';
 import { Permission, useUser } from '@app/hooks/useUser';
 import globalMessages from '@app/i18n/globalMessages';
 import defineMessages from '@app/utils/defineMessages';
 import { MediaStatus } from '@server/constants/media';
+import type { MediaServerType } from '@server/constants/server';
 import type { DownloadingItem } from '@server/lib/downloadtracker';
 import { useIntl } from 'react-intl';
 
@@ -27,6 +30,8 @@ interface StatusBadgeProps {
   is4k?: boolean;
   inProgress?: boolean;
   plexUrl?: string;
+  /** Which media server `plexUrl` opens, so the link is named after it. */
+  mediaServerType?: MediaServerType;
   serviceUrl?: string;
   tmdbId?: number;
   mediaType?: 'movie' | 'tv';
@@ -40,6 +45,7 @@ const StatusBadge = ({
   is4k = false,
   inProgress = false,
   plexUrl,
+  mediaServerType,
   serviceUrl,
   tmdbId,
   mediaType,
@@ -86,7 +92,9 @@ const StatusBadge = ({
   ) {
     mediaLink = plexUrl;
     mediaLinkDescription = intl.formatMessage(messages.playonplex, {
-      mediaServerName: primaryName,
+      mediaServerName: mediaServerType
+        ? getMediaServerName(mediaServerType)
+        : primaryName,
     });
   } else if (hasPermission(Permission.MANAGE_REQUESTS)) {
     if (mediaType && tmdbId) {

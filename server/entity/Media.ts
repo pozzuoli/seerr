@@ -226,6 +226,10 @@ class Media {
   public mediaUrl?: string;
   public mediaUrl4k?: string;
 
+  /** Which media server `mediaUrl` and `mediaUrl4k` open. */
+  public mediaUrlServer?: MediaServerType;
+  public mediaUrl4kServer?: MediaServerType;
+
   /**
    * Per-server deep links. When several media servers are connected the same
    * item can live on more than one of them, so each gets its own link and
@@ -318,16 +322,39 @@ class Media {
     }
 
     // `mediaUrl` is the single link the UI falls back to. Prefer the primary
-    // media server, but use the other one when only it holds the item.
+    // media server, but use the other one when only it holds the item, and
+    // record which server it opens so the UI can name it correctly.
     const primaryIsPlex =
       settings.main.mediaServerType === MediaServerType.PLEX;
+    const jellyfinServerType = enabledMediaServers.includes(
+      MediaServerType.EMBY
+    )
+      ? MediaServerType.EMBY
+      : MediaServerType.JELLYFIN;
 
-    this.mediaUrl = primaryIsPlex
-      ? (this.plexUrl ?? this.jellyfinUrl)
-      : (this.jellyfinUrl ?? this.plexUrl);
-    this.mediaUrl4k = primaryIsPlex
-      ? (this.plexUrl4k ?? this.jellyfinUrl4k)
-      : (this.jellyfinUrl4k ?? this.plexUrl4k);
+    const pickLink = (
+      plexLink?: string,
+      jellyfinLink?: string
+    ): { url?: string; server?: MediaServerType } => {
+      const candidates = [
+        { url: plexLink, server: MediaServerType.PLEX },
+        { url: jellyfinLink, server: jellyfinServerType },
+      ];
+
+      if (!primaryIsPlex) {
+        candidates.reverse();
+      }
+
+      return candidates.find((candidate) => candidate.url) ?? {};
+    };
+
+    const link = pickLink(this.plexUrl, this.jellyfinUrl);
+    const link4k = pickLink(this.plexUrl4k, this.jellyfinUrl4k);
+
+    this.mediaUrl = link.url;
+    this.mediaUrlServer = link.server;
+    this.mediaUrl4k = link4k.url;
+    this.mediaUrl4kServer = link4k.server;
   }
 
   @AfterLoad()

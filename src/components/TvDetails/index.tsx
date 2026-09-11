@@ -27,6 +27,7 @@ import StatusBadge from '@app/components/StatusBadge';
 import Season from '@app/components/TvDetails/Season';
 import useDeepLinks from '@app/hooks/useDeepLinks';
 import useLocale from '@app/hooks/useLocale';
+import useMediaServers from '@app/hooks/useMediaServers';
 import useSettings from '@app/hooks/useSettings';
 import useToasts from '@app/hooks/useToasts';
 import { Permission, UserType, useUser } from '@app/hooks/useUser';
@@ -119,6 +120,7 @@ interface TvDetailsProps {
 const TvDetails = ({ tv }: TvDetailsProps) => {
   const settings = useSettings();
   const { user, hasPermission } = useUser();
+  const { primary, jellyfinName } = useMediaServers();
   const router = useRouter();
   const intl = useIntl();
   const { locale } = useLocale();
@@ -173,9 +175,19 @@ const TvDetails = ({ tv }: TvDetailsProps) => {
     []
   );
 
-  const { mediaUrl: plexUrl, mediaUrl4k: plexUrl4k } = useDeepLinks({
+  const { mediaUrl, mediaUrl4k } = useDeepLinks({
     mediaUrl: data?.mediaInfo?.mediaUrl,
     mediaUrl4k: data?.mediaInfo?.mediaUrl4k,
+    iOSPlexUrl: data?.mediaInfo?.iOSPlexUrl,
+    iOSPlexUrl4k: data?.mediaInfo?.iOSPlexUrl4k,
+    mediaUrlServer: data?.mediaInfo?.mediaUrlServer,
+    mediaUrl4kServer: data?.mediaInfo?.mediaUrl4kServer,
+  });
+  // The play buttons link to each server that holds the title, so only the
+  // Plex one should become a Plex app link on iOS.
+  const { mediaUrl: plexUrl, mediaUrl4k: plexUrl4k } = useDeepLinks({
+    mediaUrl: data?.mediaInfo?.plexUrl,
+    mediaUrl4k: data?.mediaInfo?.plexUrl4k,
     iOSPlexUrl: data?.mediaInfo?.iOSPlexUrl,
     iOSPlexUrl4k: data?.mediaInfo?.iOSPlexUrl4k,
   });
@@ -190,30 +202,51 @@ const TvDetails = ({ tv }: TvDetailsProps) => {
 
   const mediaLinks: PlayButtonLink[] = [];
 
+  // One button per server that holds the title, each named after its own
+  // server rather than the primary one. The primary server's comes first.
+  const playTargets = [
+    { name: 'Plex', url: plexUrl, url4k: plexUrl4k },
+    {
+      name: jellyfinName,
+      url: data.mediaInfo?.jellyfinUrl,
+      url4k: data.mediaInfo?.jellyfinUrl4k,
+    },
+  ];
+
+  if (primary !== MediaServerType.PLEX) {
+    playTargets.reverse();
+  }
+
   if (
-    plexUrl &&
     hasPermission([Permission.REQUEST, Permission.REQUEST_TV], {
       type: 'or',
     })
   ) {
-    mediaLinks.push({
-      text: getAvailableMediaServerName(),
-      url: plexUrl,
-      svg: <PlayIcon />,
+    playTargets.forEach(({ name, url }) => {
+      if (url) {
+        mediaLinks.push({
+          text: intl.formatMessage(messages.play, { mediaServerName: name }),
+          url,
+          svg: <PlayIcon />,
+        });
+      }
     });
   }
 
   if (
     settings.currentSettings.series4kEnabled &&
-    plexUrl4k &&
     hasPermission([Permission.REQUEST_4K, Permission.REQUEST_4K_TV], {
       type: 'or',
     })
   ) {
-    mediaLinks.push({
-      text: getAvailable4kMediaServerName(),
-      url: plexUrl4k,
-      svg: <PlayIcon />,
+    playTargets.forEach(({ name, url4k }) => {
+      if (url4k) {
+        mediaLinks.push({
+          text: intl.formatMessage(messages.play4k, { mediaServerName: name }),
+          url: url4k,
+          svg: <PlayIcon />,
+        });
+      }
     });
   }
 
@@ -344,30 +377,6 @@ const TvDetails = ({ tv }: TvDetailsProps) => {
     data?.watchProviders?.find(
       (provider) => provider.iso_3166_1 === streamingRegion
     )?.flatrate ?? [];
-
-  function getAvailableMediaServerName() {
-    if (settings.currentSettings.mediaServerType === MediaServerType.EMBY) {
-      return intl.formatMessage(messages.play, { mediaServerName: 'Emby' });
-    }
-
-    if (settings.currentSettings.mediaServerType === MediaServerType.PLEX) {
-      return intl.formatMessage(messages.play, { mediaServerName: 'Plex' });
-    }
-
-    return intl.formatMessage(messages.play, { mediaServerName: 'Jellyfin' });
-  }
-
-  function getAvailable4kMediaServerName() {
-    if (settings.currentSettings.mediaServerType === MediaServerType.EMBY) {
-      return intl.formatMessage(messages.play, { mediaServerName: 'Emby' });
-    }
-
-    if (settings.currentSettings.mediaServerType === MediaServerType.PLEX) {
-      return intl.formatMessage(messages.play4k, { mediaServerName: 'Plex' });
-    }
-
-    return intl.formatMessage(messages.play, { mediaServerName: 'Jellyfin' });
-  }
 
   const onClickWatchlistBtn = async (): Promise<void> => {
     setIsUpdating(true);
@@ -571,7 +580,8 @@ const TvDetails = ({ tv }: TvDetailsProps) => {
               inProgress={(data.mediaInfo?.downloadStatus ?? []).length > 0}
               tmdbId={data.mediaInfo?.tmdbId}
               mediaType="tv"
-              plexUrl={plexUrl}
+              plexUrl={mediaUrl}
+              mediaServerType={data.mediaInfo?.mediaUrlServer}
               serviceUrl={data.mediaInfo?.serviceUrl}
             />
             {settings.currentSettings.series4kEnabled &&
@@ -595,7 +605,8 @@ const TvDetails = ({ tv }: TvDetailsProps) => {
                   }
                   tmdbId={data.mediaInfo?.tmdbId}
                   mediaType="tv"
-                  plexUrl={plexUrl4k}
+                  plexUrl={mediaUrl4k}
+                  mediaServerType={data.mediaInfo?.mediaUrl4kServer}
                   serviceUrl={data.mediaInfo?.serviceUrl4k}
                 />
               )}
@@ -1333,7 +1344,7 @@ const TvDetails = ({ tv }: TvDetailsProps) => {
                 tvdbId={data.externalIds.tvdbId}
                 imdbId={data.externalIds.imdbId}
                 rtUrl={ratingData?.url}
-                mediaUrl={plexUrl ?? plexUrl4k}
+                mediaUrl={mediaUrl ?? mediaUrl4k}
                 plexUrl={data.mediaInfo?.plexUrl ?? data.mediaInfo?.plexUrl4k}
                 jellyfinUrl={
                   data.mediaInfo?.jellyfinUrl ?? data.mediaInfo?.jellyfinUrl4k

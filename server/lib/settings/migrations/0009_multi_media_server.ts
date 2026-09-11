@@ -13,6 +13,7 @@ const migrateMultiMediaServer = (settings: any): AllSettings => {
 
   const mediaServerType = settings.main?.mediaServerType;
 
+  settings.main ??= {};
   settings.main.enabledMediaServers =
     mediaServerType && mediaServerType !== MediaServerType.NOT_CONFIGURED
       ? [mediaServerType]
