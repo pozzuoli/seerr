@@ -147,7 +147,8 @@ class JellyfinAPI extends ExternalAPI {
   constructor(
     jellyfinHost: string,
     authToken?: string | null,
-    deviceId?: string | null
+    deviceId?: string | null,
+    serverType?: MediaServerType.JELLYFIN | MediaServerType.EMBY
   ) {
     const safeDeviceId =
       deviceId && deviceId.length > 0
@@ -156,9 +157,11 @@ class JellyfinAPI extends ExternalAPI {
 
     // Emby and Jellyfin share this client but differ in a few API details, so
     // resolve which of the two is actually connected rather than assuming the
-    // primary media server is one of them (it may be Plex).
+    // primary media server is one of them (it may be Plex). Callers connecting
+    // a server that is not connected yet pass the type explicitly, since there
+    // is nothing in settings to resolve it from.
     const jellyfinServerType =
-      getJellyfinServerType() ?? MediaServerType.JELLYFIN;
+      serverType ?? getJellyfinServerType() ?? MediaServerType.JELLYFIN;
 
     const version =
       jellyfinServerType === MediaServerType.EMBY ? '1.0.0' : getAppVersion();
@@ -323,6 +326,19 @@ class JellyfinAPI extends ExternalAPI {
 
       return systemInfoResponse;
     } catch (e) {
+      // ApiError only carries a code, so record the underlying failure here.
+      // Without a response this is a transport problem (DNS, refused
+      // connection, or an untrusted TLS certificate), not bad credentials.
+      logger.error(
+        `Something went wrong getting system info from the Jellyfin server: ${e.message}`,
+        {
+          label: 'Jellyfin API',
+          status: e.response?.status,
+          code: e.code,
+          cause: e.cause?.code ?? e.cause?.message,
+        }
+      );
+
       if (!e.response) {
         throw new ApiError(502, ApiErrorCode.ConnectionError);
       }

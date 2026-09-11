@@ -491,6 +491,32 @@ components:
         - id
         - name
         - enabled
+    MediaServerStatus:
+      type: object
+      properties:
+        type:
+          type: number
+          description: 1 for Plex, 2 for Jellyfin, 3 for Emby
+          example: 3
+        name:
+          type: string
+          example: 'Emby'
+        enabled:
+          type: boolean
+          description: Whether Seerr syncs with and authenticates against this server
+          example: true
+        isPrimary:
+          type: boolean
+          description: Whether this server drives naming and deep link defaults
+          example: false
+        configured:
+          type: boolean
+          description: Whether connection details for this server have been saved
+          example: true
+        linked:
+          type: boolean
+          description: Whether the admin account holds credentials for this server
+          example: true
     JellyfinSettings:
       type: object
       properties:
@@ -2289,6 +2315,117 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MainSettings'
+  /settings/mediaservers:
+    get:
+      summary: Get media server connection status
+      description: >-
+        Returns every media server Seerr can connect to, whether each one is
+        currently connected, and whether it has enough configuration to be
+        turned on.
+      tags:
+        - settings
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MediaServerStatus'
+    post:
+      summary: Connect or disconnect a media server
+      description: >-
+        Connects or disconnects a single media server. Plex and Jellyfin/Emby
+        can be connected at the same time, so this only ever changes the server
+        named in the request.
+      tags:
+        - settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - type
+                - enabled
+              properties:
+                type:
+                  type: number
+                  description: 1 for Plex, 2 for Jellyfin, 3 for Emby
+                  example: 3
+                enabled:
+                  type: boolean
+                  example: true
+      responses:
+        '200':
+          description: 'The media server was connected or disconnected'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  type:
+                    type: number
+                    example: 3
+                  enabled:
+                    type: boolean
+                    example: true
+  /settings/jellyfin/connect:
+    post:
+      summary: Connect an additional Jellyfin or Emby server
+      description: >-
+        Connects a Jellyfin or Emby server to an install that is already
+        running, for example one already using Plex. Authenticates with either
+        an existing API key or the administrator's password, and links that
+        account to the admin user.
+      tags:
+        - settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - serverType
+                - hostname
+                - port
+                - username
+              properties:
+                serverType:
+                  type: number
+                  description: 2 for Jellyfin, 3 for Emby
+                  example: 3
+                hostname:
+                  type: string
+                  example: 'emby.example.com'
+                port:
+                  type: number
+                  example: 443
+                urlBase:
+                  type: string
+                  example: ''
+                useSsl:
+                  type: boolean
+                  example: true
+                username:
+                  type: string
+                  example: 'admin'
+                password:
+                  type: string
+                  description: Required unless apiKey is supplied.
+                apiKey:
+                  type: string
+                  description: Required unless password is supplied.
+      responses:
+        '200':
+          description: 'The server was connected'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JellyfinSettings'
   /settings/jellyfin:
     get:
       summary: Get Jellyfin settings
