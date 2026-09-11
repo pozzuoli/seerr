@@ -39,6 +39,32 @@ pnpm merge-instance --source /path/to/other-db.sqlite3 --apply
 
 If the source database is from an older Seerr version, add `--migrate-source` to bring the copy up to the current schema first. Only ever do this against a copy.
 
+### Running the Merge in Docker
+
+The Docker image does not include `pnpm`, so run the compiled script with `node` from a one-off container that uses the same image and config volume as the surviving instance. Stop the surviving instance first.
+
+Copy the other instance's database into the surviving instance's config directory so the container can see it. Copy every `db.sqlite3*` file together: a `db.sqlite3-wal` file next to the database holds changes that have not been written into it yet. The container runs as UID 1000, so the files must be owned by it:
+
+```bash
+mkdir -p /path/to/config/merge
+cp /path/to/other/config/db/db.sqlite3* /path/to/config/merge/
+chown -R 1000:1000 /path/to/config/merge
+```
+
+Then run the dry run, using the image the surviving instance runs (`docker ps --format '{{.Names}}  {{.Image}}'` shows it):
+
+```bash
+docker run --rm -v /path/to/config:/app/config <seerr-image> node dist/scripts/mergeInstance.js --source /app/config/merge/db.sqlite3
+```
+
+With Docker Compose, the equivalent is:
+
+```bash
+docker compose run --rm seerr node dist/scripts/mergeInstance.js --source /app/config/merge/db.sqlite3
+```
+
+Add `--apply` (and `--keep-permissions` if wanted) to write the merge, then start the instance again.
+
 ## What Gets Merged
 
 | Data | How it is matched |
@@ -52,6 +78,16 @@ If the source database is from an older Seerr version, add `--migrate-source` to
 | Blocklist | TMDB ID and media type |
 
 Someone who exists on both instances ends up as a single account holding both media server identities, so their requests and watchlist stay together. A title that exists on both instances keeps the surviving instance's row and gains the other server's media ID, so it links and plays on either server.
+
+### Same Person, Different Email
+
+Users are only matched on media server IDs and email address, never on username. If someone uses a different email on each instance, the merge creates a second account for them. This is common with Jellyfin and Emby users, whose email is often just their username. Without `--keep-permissions`, the dry run names every account it would create, so check that list before applying.
+
+To fold one of them into the right account, change their email in the **copy** of the source database to the one they use on the surviving instance, then run the dry run again. The account should move from created to updated:
+
+```bash
+docker run --rm -v /path/to/config:/app/config <seerr-image> node -e 'const db=new (require("sqlite3").Database)("/app/config/merge/db.sqlite3");db.run("UPDATE [user] SET email = ? WHERE lower(email) = lower(?)",["person@example.com","their-old-email-or-username"],function(e){console.log(e?e.message:this.changes+" row(s) changed");db.close()})'
+```
 
 Where two rows disagree on availability, the more available status wins. Anything already present on the surviving instance is left as it is; the merge only ever fills in what is missing.
 
