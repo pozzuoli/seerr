@@ -19,6 +19,7 @@ import type Season from '@server/entity/Season';
 import { User } from '@server/entity/User';
 import {
   getEnabledMediaServers,
+  getJellyfinServerType,
   getMediaServerName,
   isJellyfinEnabled,
   isPlexEnabled,
@@ -27,6 +28,7 @@ import type { RadarrSettings, SonarrSettings } from '@server/lib/settings';
 import { getSettings } from '@server/lib/settings';
 import logger from '@server/logger';
 import { getHostname } from '@server/utils/getHostname';
+import { Brackets, In } from 'typeorm';
 
 class AvailabilitySync {
   public running = false;
@@ -54,7 +56,25 @@ class AvailabilitySync {
 
   readonly tmdb = new TheMovieDb();
 
+  /** How many media rows each page of the sync loads. */
+  pageSize = 50;
+
+  /** Whichever of Jellyfin/Emby is connected, for log lines. */
+  private get jellyfinName(): string {
+    return getMediaServerName(
+      getJellyfinServerType() ?? MediaServerType.JELLYFIN
+    );
+  }
+
   async run() {
+    // A second run would reset the caches and clients the first one is using.
+    if (this.running) {
+      logger.warn('Availability sync is already running.', {
+        label: 'AvailabilitySync',
+      });
+      return;
+    }
+
     const settings = getSettings();
     const enabledMediaServers = getEnabledMediaServers();
     const plexEnabled = isPlexEnabled();
@@ -76,7 +96,6 @@ class AvailabilitySync {
       logger.info(`Starting availability sync...`, {
         label: 'AvailabilitySync',
       });
-      const pageSize = 50;
 
       const userRepository = getRepository(User);
 
@@ -121,6 +140,7 @@ class AvailabilitySync {
               'Plex is unreachable. Its availability will not be checked.',
               {
                 label: 'AvailabilitySync',
+                server: 'Plex',
                 errorMessage: e.message,
               }
             );
@@ -128,7 +148,7 @@ class AvailabilitySync {
         } else {
           logger.error(
             'Plex admin is not configured. Plex availability will not be checked.',
-            { label: 'AvailabilitySync' }
+            { label: 'AvailabilitySync', server: 'Plex' }
           );
         }
       }
@@ -147,13 +167,10 @@ class AvailabilitySync {
           this.jellyfinAvailable = true;
         } catch (e) {
           logger.error(
-            `${getMediaServerName(
-              enabledMediaServers.includes(MediaServerType.EMBY)
-                ? MediaServerType.EMBY
-                : MediaServerType.JELLYFIN
-            )} is unreachable. Its availability will not be checked.`,
+            `${this.jellyfinName} is unreachable. Its availability will not be checked.`,
             {
               label: 'AvailabilitySync',
+              server: this.jellyfinName,
               status: e.statusCode,
               error: e.name,
               errorMessage: e.errorCode,
@@ -174,7 +191,9 @@ class AvailabilitySync {
         return;
       }
 
-      for await (const media of this.loadAvailableMediaPaginated(pageSize)) {
+      for await (const media of this.loadAvailableMediaPaginated(
+        this.pageSize
+      )) {
         if (!this.running) {
           throw new Error('Job aborted');
         }
@@ -438,30 +457,51 @@ class AvailabilitySync {
     this.running = false;
   }
 
+  /**
+   * Pages through media that is available in any form. Pages continue after
+   * the last id seen rather than at an offset: the sync marks media deleted as
+   * it goes, which shrinks the result set and would make an offset skip rows.
+   */
   private async *loadAvailableMediaPaginated(pageSize: number) {
-    let offset = 0;
     const mediaRepository = getRepository(Media);
-    const whereOptions = [
-      { status: MediaStatus.AVAILABLE },
-      { status: MediaStatus.PARTIALLY_AVAILABLE },
-      { status4k: MediaStatus.AVAILABLE },
-      { status4k: MediaStatus.PARTIALLY_AVAILABLE },
-      { seasons: { status: MediaStatus.AVAILABLE } },
-      { seasons: { status: MediaStatus.PARTIALLY_AVAILABLE } },
-      { seasons: { status4k: MediaStatus.AVAILABLE } },
-      { seasons: { status4k: MediaStatus.PARTIALLY_AVAILABLE } },
-    ];
+    const available = [MediaStatus.AVAILABLE, MediaStatus.PARTIALLY_AVAILABLE];
+    let lastId = 0;
 
-    let mediaPage: Media[];
+    while (true) {
+      const ids = (
+        await mediaRepository
+          .createQueryBuilder('media')
+          .select('media.id', 'id')
+          .distinct(true)
+          .leftJoin('media.seasons', 'season')
+          .where('media.id > :lastId', { lastId })
+          .andWhere(
+            new Brackets((qb) =>
+              qb
+                .where('media.status IN (:...available)', { available })
+                .orWhere('media.status4k IN (:...available)')
+                .orWhere('season.status IN (:...available)')
+                .orWhere('season.status4k IN (:...available)')
+            )
+          )
+          .orderBy('media.id', 'ASC')
+          .limit(pageSize)
+          .getRawMany<{ id: number }>()
+      ).map((row) => Number(row.id));
 
-    do {
-      yield* (mediaPage = await mediaRepository.find({
-        where: whereOptions,
-        skip: offset,
-        take: pageSize,
-      }));
-      offset += pageSize;
-    } while (mediaPage.length > 0);
+      if (ids.length === 0) {
+        return;
+      }
+
+      // Load the rows separately so every season comes with them, not only
+      // the seasons that matched the filter.
+      yield* await mediaRepository.find({
+        where: { id: In(ids) },
+        order: { id: 'ASC' },
+      });
+
+      lastId = ids[ids.length - 1];
+    }
   }
 
   private async mediaUpdater(
@@ -939,6 +979,7 @@ class AvailabilitySync {
           {
             errorMessage: ex.message,
             label: 'AvailabilitySync',
+            server: 'Plex',
           }
         );
       }
@@ -1097,10 +1138,11 @@ class AvailabilitySync {
         logger.debug(
           `Failure retrieving the ${is4k ? '4K' : 'non-4K'} ${
             media.mediaType === 'tv' ? 'show' : 'movie'
-          } [TMDB ID ${media.tmdbId}] from Jellyfin.`,
+          } [TMDB ID ${media.tmdbId}] from ${this.jellyfinName}.`,
           {
             errorMessage: ex.message,
             label: 'AvailabilitySync',
+            server: this.jellyfinName,
           }
         );
       }

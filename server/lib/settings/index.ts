@@ -1,4 +1,7 @@
-import { MediaServerType } from '@server/constants/server';
+import {
+  MediaServerType,
+  resolveEnabledMediaServers,
+} from '@server/constants/server';
 import { Permission } from '@server/lib/permissions';
 import { runMigrations } from '@server/lib/settings/migrator';
 import type { AvailableLocale } from '@server/types/languages';
@@ -764,22 +767,10 @@ class Settings {
 
   /**
    * Every connected media server, falling back to the primary server for
-   * configurations that predate multi media server support. Mirrors
-   * `getEnabledMediaServers()` in `@server/lib/mediaServers`, duplicated here
-   * to keep this module free of a circular import.
+   * configurations that predate multi media server support.
    */
   get enabledMediaServers(): MediaServerType[] {
-    const enabled = (this.data.main.enabledMediaServers ?? []).filter(
-      (serverType) => serverType !== MediaServerType.NOT_CONFIGURED
-    );
-
-    if (enabled.length > 0) {
-      return [...new Set(enabled)];
-    }
-
-    return this.data.main.mediaServerType !== MediaServerType.NOT_CONFIGURED
-      ? [this.data.main.mediaServerType]
-      : [];
+    return resolveEnabledMediaServers(this.data.main);
   }
 
   get notifications(): NotificationSettings {

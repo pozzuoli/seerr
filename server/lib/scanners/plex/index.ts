@@ -56,6 +56,10 @@ class PlexScanner
     this.isRecentOnly = isRecentOnly;
   }
 
+  protected get serverName(): string {
+    return 'Plex';
+  }
+
   public status(): SyncStatus {
     return {
       running: this.running,

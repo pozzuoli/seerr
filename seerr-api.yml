@@ -2255,7 +2255,7 @@ paths:
                 $ref: '#/components/schemas/MainSettings'
     post:
       summary: Update main settings
-      description: Updates main settings with the provided values.
+      description: Updates main settings with the provided values. `mediaServerType` and `enabledMediaServers` can only be sent with their current values; connect or disconnect a media server to change them.
       tags:
         - settings
       requestBody:
@@ -2271,6 +2271,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MainSettings'
+        '400':
+          description: The request tried to change `mediaServerType` or `enabledMediaServers`
   /settings/network:
     get:
       summary: Get network settings

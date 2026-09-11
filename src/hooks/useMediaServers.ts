@@ -1,5 +1,8 @@
 import useSettings from '@app/hooks/useSettings';
-import { MediaServerType } from '@server/constants/server';
+import {
+  MediaServerType,
+  resolveEnabledMediaServers,
+} from '@server/constants/server';
 import { useMemo } from 'react';
 
 export const getMediaServerName = (serverType: MediaServerType): string => {
@@ -34,24 +37,17 @@ interface MediaServers {
 }
 
 /**
- * Resolves which media servers this install is connected to. Configurations
- * that predate multi media server support only report `mediaServerType`, so
- * fall back to it when the list is missing.
+ * Resolves which media servers this install is connected to, using the same
+ * rules as the server.
  */
 const useMediaServers = (): MediaServers => {
   const { currentSettings } = useSettings();
 
   return useMemo(() => {
-    const configured = (currentSettings.enabledMediaServers ?? []).filter(
-      (serverType) => serverType !== MediaServerType.NOT_CONFIGURED
-    );
-
-    const enabled =
-      configured.length > 0
-        ? [...new Set(configured)]
-        : currentSettings.mediaServerType !== MediaServerType.NOT_CONFIGURED
-          ? [currentSettings.mediaServerType]
-          : [];
+    const enabled = resolveEnabledMediaServers({
+      mediaServerType: currentSettings.mediaServerType,
+      enabledMediaServers: currentSettings.enabledMediaServers,
+    });
 
     const jellyfinServerType = enabled.includes(MediaServerType.EMBY)
       ? MediaServerType.EMBY
