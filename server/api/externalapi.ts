@@ -1,4 +1,5 @@
 import type { CacheStore } from '@server/lib/cache';
+import logger from '@server/logger';
 import { proxyRequestInterceptor } from '@server/utils/customProxyAgent';
 import { userAgentRequestInterceptor } from '@server/utils/userAgent';
 import type { AxiosInstance, AxiosRequestConfig } from 'axios';
@@ -128,9 +129,19 @@ class ExternalAPI {
         keyTtl - (ttl ?? DEFAULT_TTL) * 1000 <
         Date.now() - DEFAULT_ROLLING_BUFFER
       ) {
-        this.axios.get<T>(endpoint, config).then((response) => {
-          this.cache?.set(cacheKey, response.data, ttl ?? DEFAULT_TTL);
-        });
+        this.axios
+          .get<T>(endpoint, config)
+          .then((response) => {
+            this.cache?.set(cacheKey, response.data, ttl ?? DEFAULT_TTL);
+          })
+          .catch((e) => {
+            // Nothing awaits this refresh, so an unhandled rejection here could
+            // take the process down. The cached copy keeps being served.
+            logger.debug(`Background refresh of ${endpoint} failed`, {
+              label: 'External API',
+              errorMessage: e.message,
+            });
+          });
       }
       return cachedItem;
     }

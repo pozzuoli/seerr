@@ -57,7 +57,7 @@ export const runMigrations = async (
             label: 'Settings Migrator',
           }
         );
-        process.exit();
+        process.exit(1);
       }
     }
 
@@ -94,7 +94,7 @@ export const runMigrations = async (
         label: 'Settings Migrator',
       }
     );
-    process.exit();
+    process.exit(1);
   }
 
   return migrated;
