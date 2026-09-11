@@ -1089,6 +1089,7 @@
   "components.Settings.SettingsMediaServers.replaceTitle": "Replace the {serverName} Server?",
   "components.Settings.SettingsMediaServers.replacing": "Replacing…",
   "components.Settings.SettingsMediaServers.serverType": "Server Type",
+  "components.Settings.SettingsMediaServers.setUpPlex": "Set Up Plex",
   "components.Settings.SettingsMediaServers.toggleFailure": "Something went wrong updating {serverName}.",
   "components.Settings.SettingsMediaServers.toggleSuccess": "{serverName} {enabled, select, true {connected} other {disconnected}} successfully!",
   "components.Settings.SettingsMediaServers.urlBase": "URL Base",

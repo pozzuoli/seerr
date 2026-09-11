@@ -68,6 +68,7 @@ const messages = defineMessages('components.Settings.SettingsMediaServers', {
     'This is a different {serverName} server from the one Seerr was connected to before. Connecting it forgets the items and library selection Seerr kept for the old server, so choose libraries and run a full scan afterwards. Linked user accounts are not changed.',
   replaceConfirm: 'Replace Server',
   replacing: 'Replacing…',
+  setUpPlex: 'Set Up Plex',
 });
 
 const SettingsMediaServers = () => {
@@ -273,13 +274,27 @@ const SettingsMediaServers = () => {
                       {intl.formatMessage(messages.disconnect)}
                     </Button>
                   ) : (
-                    <Button
-                      buttonType="primary"
-                      disabled={isUpdating || !canEnable}
-                      onClick={() => toggleServer(server, true)}
-                    >
-                      {intl.formatMessage(messages.connect)}
-                    </Button>
+                    <div className="flex gap-2">
+                      {/* The Plex settings tab only appears once Plex is
+                          connected, but connecting needs it set up first. */}
+                      {server.type === MediaServerType.PLEX &&
+                        !server.configured && (
+                          <Button
+                            as="a"
+                            href="/settings/plex"
+                            buttonType="ghost"
+                          >
+                            {intl.formatMessage(messages.setUpPlex)}
+                          </Button>
+                        )}
+                      <Button
+                        buttonType="primary"
+                        disabled={isUpdating || !canEnable}
+                        onClick={() => toggleServer(server, true)}
+                      >
+                        {intl.formatMessage(messages.connect)}
+                      </Button>
+                    </div>
                   )}
                 </div>
               </li>
