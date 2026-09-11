@@ -140,9 +140,13 @@ export interface JellyfinItemsReponse {
   StartIndex: number;
 }
 
+// How long one server health check stands during an availability sync.
+const HEALTH_CHECK_TTL = 30 * 1000;
+
 class JellyfinAPI extends ExternalAPI {
   private userId?: string;
   private mediaServerType: MediaServerType;
+  private serverHealth?: { healthy: boolean; checkedAt: number };
 
   constructor(
     jellyfinHost: string,
@@ -530,10 +534,17 @@ class JellyfinAPI extends ExternalAPI {
 
       return itemResponse.Items?.[0];
     } catch (e) {
-      if (availabilitySync.running) {
-        if (e.response?.status === 500) {
+      // During an availability sync some servers answer a deleted item with a
+      // 500, so it has long been read as "gone". A struggling server returns
+      // 500 for everything, though, so only trust it while the server itself
+      // still responds. Otherwise report a connection error, which the sync
+      // treats as "still exists".
+      if (availabilitySync.running && e.response?.status === 500) {
+        if (await this.isServerHealthy()) {
           return undefined;
         }
+
+        throw new ApiError(502, ApiErrorCode.ConnectionError);
       }
 
       logger.error(
@@ -546,6 +557,33 @@ class JellyfinAPI extends ExternalAPI {
 
       throw new ApiError(e.response.status, ApiErrorCode.InvalidAuthToken);
     }
+  }
+
+  /**
+   * Whether the server itself is responding. The answer is kept briefly, so a
+   * run of failing items costs one extra request rather than one each.
+   */
+  private async isServerHealthy(): Promise<boolean> {
+    const now = Date.now();
+
+    if (
+      this.serverHealth &&
+      now - this.serverHealth.checkedAt < HEALTH_CHECK_TTL
+    ) {
+      return this.serverHealth.healthy;
+    }
+
+    let healthy = true;
+
+    try {
+      await this.getSystemInfo();
+    } catch {
+      healthy = false;
+    }
+
+    this.serverHealth = { healthy, checkedAt: now };
+
+    return healthy;
   }
 
   public async getSeasons(seriesID: string): Promise<JellyfinLibraryItem[]> {
