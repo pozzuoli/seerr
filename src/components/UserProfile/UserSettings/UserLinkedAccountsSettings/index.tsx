@@ -72,26 +72,31 @@ const UserLinkedAccountsSettings = () => {
 
   const applicationName = settings.currentSettings.applicationTitle;
 
+  // Build the list from the accounts the user actually has linked. The user
+  // type only records one of them, so a Plex user who also linked Emby would
+  // otherwise never see that account, and could never stop being offered it.
   const accounts: LinkedAccount[] = useMemo(() => {
     const accounts: LinkedAccount[] = [];
     if (!user) return accounts;
-    if (user.userType === UserType.PLEX && user.plexUsername)
+    if (user.plexUsername)
       accounts.push({
         type: LinkedAccountType.Plex,
         username: user.plexUsername,
       });
-    if (user.userType === UserType.EMBY && user.jellyfinUsername)
+    if (user.jellyfinUsername) {
+      // Jellyfin and Emby share one connection, so name the account after
+      // whichever is connected, falling back to the user's own type.
+      const isEmby = jellyfinServerType
+        ? jellyfinServerType === MediaServerType.EMBY
+        : user.userType === UserType.EMBY;
+
       accounts.push({
-        type: LinkedAccountType.Emby,
+        type: isEmby ? LinkedAccountType.Emby : LinkedAccountType.Jellyfin,
         username: user.jellyfinUsername,
       });
-    if (user.userType === UserType.JELLYFIN && user.jellyfinUsername)
-      accounts.push({
-        type: LinkedAccountType.Jellyfin,
-        username: user.jellyfinUsername,
-      });
+    }
     return accounts;
-  }, [user]);
+  }, [user, jellyfinServerType]);
 
   const linkPlexAccount = async () => {
     setError(null);
