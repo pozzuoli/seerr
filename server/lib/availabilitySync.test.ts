@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { afterEach, beforeEach, describe, it } from 'node:test';
+import { beforeEach, describe, it } from 'node:test';
 
 import type {
   JellyfinLibraryItem,
@@ -1059,7 +1059,9 @@ describe('AvailabilitySync', () => {
   });
 
   describe('running the sync', () => {
-    afterEach(() => {
+    // Reset before each test so a test that fails early cannot leak its
+    // page size into the next one.
+    beforeEach(() => {
       availabilitySync.pageSize = 50;
     });
 
