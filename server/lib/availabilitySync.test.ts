@@ -1029,6 +1029,152 @@ describe('AvailabilitySync', () => {
     });
   });
 
+  describe('both media servers connected', () => {
+    function configureBoth(
+      jellyfinServerType:
+        | MediaServerType.JELLYFIN
+        | MediaServerType.EMBY = MediaServerType.JELLYFIN
+    ): void {
+      configureJellyfin();
+      const settings = getSettings();
+      settings.main.mediaServerType = MediaServerType.PLEX;
+      settings.main.enabledMediaServers = [
+        MediaServerType.PLEX,
+        jellyfinServerType,
+      ];
+    }
+
+    function fakeJellyfinMovie(
+      id: string,
+      tmdbId: string
+    ): JellyfinLibraryItemExtended {
+      return {
+        Name: 'Test Movie',
+        Id: id,
+        Type: 'Movie',
+        HasSubtitles: false,
+        LocationType: 'FileSystem',
+        MediaType: 'Video',
+        ProviderIds: { Tmdb: tmdbId },
+      };
+    }
+
+    async function saveMovieOnBoth(tmdbId: number): Promise<Media> {
+      const media = new Media();
+      media.tmdbId = tmdbId;
+      media.mediaType = MediaType.MOVIE;
+      media.status = MediaStatus.AVAILABLE;
+      media.ratingKey = `plex-${tmdbId}`;
+      media.jellyfinMediaId = `jellyfin-${tmdbId}`;
+
+      return getRepository(Media).save(media);
+    }
+
+    it('keeps a movie Plex no longer has while Jellyfin still has it', async () => {
+      configureBoth();
+      configureRadarr();
+
+      const media = await saveMovieOnBoth(4100);
+
+      getItemDataImpl = async (id: string) =>
+        id === 'jellyfin-4100' ? fakeJellyfinMovie(id, '4100') : undefined;
+
+      await availabilitySync.run();
+
+      const updated = await getRepository(Media).findOneOrFail({
+        where: { id: media.id },
+      });
+
+      assert.strictEqual(updated.status, MediaStatus.AVAILABLE);
+      assert.strictEqual(
+        updated.ratingKey,
+        'plex-4100',
+        'A kept movie must keep its Plex id for when Plex has it again'
+      );
+    });
+
+    it('deletes a movie neither server has, and forgets both ids (Emby)', async () => {
+      configureBoth(MediaServerType.EMBY);
+      configureRadarr();
+
+      const media = await saveMovieOnBoth(4101);
+
+      await availabilitySync.run();
+
+      const updated = await getRepository(Media).findOneOrFail({
+        where: { id: media.id },
+      });
+
+      assert.strictEqual(updated.status, MediaStatus.DELETED);
+      assert.strictEqual(updated.ratingKey, null);
+      assert.strictEqual(updated.jellyfinMediaId, null);
+    });
+
+    it('keeps each season that at least one server has', async () => {
+      configureBoth();
+      configureSonarr([{ syncEnabled: true }]);
+
+      const media = new Media();
+      media.tmdbId = 4102;
+      media.mediaType = MediaType.TV;
+      media.status = MediaStatus.AVAILABLE;
+      media.ratingKey = 'plex-split-rk';
+      media.jellyfinMediaId = 'jellyfin-split-id';
+      media.seasons = [1, 2, 3].map(
+        (seasonNumber) =>
+          new Season({
+            seasonNumber,
+            status: MediaStatus.AVAILABLE,
+            status4k: MediaStatus.UNKNOWN,
+          })
+      );
+      await getRepository(Media).save(media);
+
+      // Plex only has season 1, Jellyfin only has season 2, nobody has 3.
+      getMetadataImpl = async (key: string) => {
+        if (key === 'plex-split-rk') {
+          return fakePlexShow(key);
+        }
+        throw new Error('404');
+      };
+      getChildrenMetadataImpl = async (key: string) => {
+        if (key === 'plex-split-rk') {
+          return [fakePlexSeason(1, 'plex-split-s1')];
+        }
+        if (key === 'plex-split-s1') {
+          return fakePlexEpisodes(5);
+        }
+        return [];
+      };
+      getItemDataImpl = async (id: string) =>
+        id === 'jellyfin-split-id' ? fakeJellyfinShow(id, '4102') : undefined;
+      getSeasonsImpl = async (seriesID: string) =>
+        seriesID === 'jellyfin-split-id'
+          ? [fakeJellyfinSeason(2, 'jellyfin-split-s2')]
+          : [];
+      getEpisodesImpl = async (_seriesID: string, seasonID: string) =>
+        seasonID === 'jellyfin-split-s2' ? fakeJellyfinEpisodes(5) : [];
+
+      await availabilitySync.run();
+
+      const updated = await getRepository(Media).findOneOrFail({
+        where: { tmdbId: 4102 },
+        relations: ['seasons'],
+      });
+      const status = (seasonNumber: number) =>
+        updated.seasons.find((s) => s.seasonNumber === seasonNumber)?.status;
+
+      assert.strictEqual(status(1), MediaStatus.AVAILABLE, 'Plex has season 1');
+      assert.strictEqual(
+        status(2),
+        MediaStatus.AVAILABLE,
+        'Jellyfin has season 2'
+      );
+      assert.strictEqual(status(3), MediaStatus.DELETED, 'Nobody has season 3');
+      assert.strictEqual(updated.status, MediaStatus.PARTIALLY_AVAILABLE);
+    });
+  });
+
   describe('TV season availability - Plex', () => {
     it('should mark deleted seasons when Plex returns empty season metadata entries', async () => {
       configurePlex();
