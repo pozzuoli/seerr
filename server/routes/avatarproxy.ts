@@ -3,9 +3,7 @@ import { getRepository } from '@server/datasource';
 import { User } from '@server/entity/User';
 import ImageProxy from '@server/lib/imageproxy';
 import { getJellyfinServerType } from '@server/lib/mediaServers';
-import { getSettings } from '@server/lib/settings';
 import logger from '@server/logger';
-import { getAppVersion } from '@server/utils/appVersion';
 import { getHostname } from '@server/utils/getHostname';
 import axios from 'axios';
 import { Router } from 'express';
@@ -16,25 +14,9 @@ const router = Router();
 
 let _avatarImageProxy: ImageProxy | null = null;
 
-async function initAvatarImageProxy() {
+function initAvatarImageProxy() {
   if (!_avatarImageProxy) {
-    const userRepository = getRepository(User);
-    const admin = await userRepository.findOne({
-      where: { id: 1 },
-      select: ['id', 'jellyfinUserId', 'jellyfinDeviceId'],
-      order: { id: 'ASC' },
-    });
-    const deviceId = admin?.jellyfinDeviceId || 'BOT_seerr';
-    const authToken = getSettings().jellyfin.apiKey;
-    _avatarImageProxy = new ImageProxy('avatar', '', {
-      headers: {
-        'X-Emby-Authorization': `MediaBrowser Client="Seerr", Device="Seerr", DeviceId="${deviceId}", Version="${
-          getJellyfinServerType() === MediaServerType.EMBY
-            ? '1.0.0'
-            : getAppVersion()
-        }", Token="${authToken}"`,
-      },
-    });
+    _avatarImageProxy = new ImageProxy('avatar', '');
   }
   return _avatarImageProxy;
 }
@@ -88,7 +70,7 @@ export async function checkAvatarChanged(
       return { changed: false, etag: user.avatarETag ?? undefined };
     }
 
-    const avatarImageCache = await initAvatarImageProxy();
+    const avatarImageCache = initAvatarImageProxy();
     await avatarImageCache.clearCachedImage(jellyfinAvatarUrl);
     const imageData = await avatarImageCache.getImage(
       jellyfinAvatarUrl,
@@ -115,19 +97,19 @@ export async function checkAvatarChanged(
   }
 }
 
-router.get('/:jellyfinUserId', async (req, res) => {
+router.get('/:jellyfinUserId', async (req, res, next) => {
+  if (!req.params.jellyfinUserId.match(/^[a-f0-9]{32}$/)) {
+    return next({
+      status: 400,
+      message: `Provided URL is not ${
+        getJellyfinServerType() === MediaServerType.EMBY
+          ? 'an Emby'
+          : 'a Jellyfin'
+      } avatar.`,
+    });
+  }
   try {
-    if (!req.params.jellyfinUserId.match(/^[a-f0-9]{32}$/)) {
-      throw new Error(
-        `Provided URL is not ${
-          getJellyfinServerType() === MediaServerType.EMBY
-            ? 'an Emby'
-            : 'a Jellyfin'
-        } avatar.`
-      );
-    }
-
-    const avatarImageCache = await initAvatarImageProxy();
+    const avatarImageCache = initAvatarImageProxy();
 
     const userEtag = req.headers['if-none-match'];
 
@@ -172,9 +154,14 @@ router.get('/:jellyfinUserId', async (req, res) => {
 
     res.end(imageData.imageBuffer);
   } catch (e) {
-    logger.error('Failed to proxy avatar image', {
-      errorMessage: e.message,
-    });
+    logger.error('Failed to proxy avatar image', { errorMessage: e.message });
+    if (!res.headersSent) {
+      return next({
+        status: 500,
+        message: 'Failed to proxy avatar image.',
+      });
+    }
+    next(e);
   }
 });
 

@@ -28,6 +28,7 @@ import Media from '@server/entity/Media';
 import MediaRequest from '@server/entity/MediaRequest';
 import Season from '@server/entity/Season';
 import { User } from '@server/entity/User';
+import availabilitySync from '@server/lib/availabilitySync';
 import type { RadarrSettings, SonarrSettings } from '@server/lib/settings';
 import { getSettings } from '@server/lib/settings';
 import logger from '@server/logger';
@@ -183,6 +184,14 @@ Object.defineProperty(TheMovieDb.prototype, 'getShowByTvdbIdForScan', {
   configurable: true,
 });
 
+// getTvShowForScan is assigned in the constructor, so the prototype stub misses
+// the instance availabilitySync built when it was first imported
+Object.defineProperty(availabilitySync.tmdb, 'getTvShowForScan', {
+  value: async (args: { tvId: number; language?: string }) =>
+    getTvShowImpl(args),
+  configurable: true,
+});
+
 // --- Helpers ---
 
 function fakeTmdbShow(
@@ -233,8 +242,6 @@ function fakeTmdbShow(
     videos: { results: [] },
   };
 }
-
-import availabilitySync from '@server/lib/availabilitySync';
 
 setupTestDb();
 
