@@ -1,98 +1,217 @@
-import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
-
-import { MediaType } from '@server/constants/media';
+import {
+  MediaRequestStatus,
+  MediaStatus,
+  MediaType,
+} from '@server/constants/media';
 import { getRepository } from '@server/datasource';
 import Media from '@server/entity/Media';
+import MediaRequest from '@server/entity/MediaRequest';
+import Season from '@server/entity/Season';
+import SeasonRequest from '@server/entity/SeasonRequest';
+import { User } from '@server/entity/User';
+import type { ProcessableSeason } from '@server/lib/scanners/baseScanner';
 import BaseScanner from '@server/lib/scanners/baseScanner';
+import { getSettings } from '@server/lib/settings';
 import { setupTestDb } from '@server/test/db';
+import assert from 'node:assert/strict';
+import { describe, it, mock } from 'node:test';
 
-/**
- * Stands in for the Plex and Jellyfin scanners: each real scanner is its own
- * instance, and with both servers connected their scans run at the same time.
- */
-class TestScanner extends BaseScanner<unknown> {
-  constructor(name: string) {
-    super(name);
+mock.method(MediaRequest, 'sendNotification', async () => undefined);
+
+setupTestDb();
+
+class HarnessScanner extends BaseScanner<unknown> {
+  public constructor(declineRequestsOnStatusReset?: boolean) {
+    super('Harness Scan');
+
+    if (declineRequestsOnStatusReset !== undefined) {
+      this.declineRequestsOnStatusReset = declineRequestsOnStatusReset;
+    }
   }
 
-  public addMovie(
+  public async scanShow(
     tmdbId: number,
-    ids: { ratingKey?: string; jellyfinMediaId?: string }
-  ) {
-    return this.processMovie(tmdbId, { ...ids, title: `Movie ${tmdbId}` });
+    seasons: ProcessableSeason[]
+  ): Promise<void> {
+    await this.processShow(tmdbId, undefined, seasons, {
+      title: 'Test Show',
+    });
+    await this.resolve();
   }
 
-  public addShow(
-    tmdbId: number,
-    tvdbId: number,
-    ids: { ratingKey?: string; jellyfinMediaId?: string }
-  ) {
-    return this.processShow(
-      tmdbId,
-      tvdbId,
-      [{ seasonNumber: 1, totalEpisodes: 10, episodes: 10, episodes4k: 0 }],
-      { ...ids, title: `Show ${tmdbId}` }
-    );
+  public scanAbandonedMovie(tmdbId: number): Promise<void> {
+    return this.processMovie(tmdbId, {
+      title: 'Test Movie',
+      processing: false,
+      hasFile: false,
+    });
+  }
+
+  // Most permissive resolver possible, so a survivor means nothing was recorded.
+  public resolve(): Promise<void> {
+    return this.resolveStatusResets(() => true);
   }
 }
 
+// Identical to what plex/index.ts and jellyfin/index.ts push for a season the library lacks.
+const LIBRARY_HAS_NO_EPISODES: ProcessableSeason[] = [
+  {
+    seasonNumber: 1,
+    episodes: 0,
+    episodes4k: 0,
+    totalEpisodes: 10,
+  },
+];
+
+async function seedInFlightShow(tmdbId: number): Promise<MediaRequest> {
+  const mediaRepository = getRepository(Media);
+  const requestRepository = getRepository(MediaRequest);
+  const userRepository = getRepository(User);
+
+  const requestedBy = await userRepository.findOneOrFail({ where: { id: 1 } });
+
+  const media = await mediaRepository.save(
+    new Media({
+      tmdbId,
+      mediaType: MediaType.TV,
+      status: MediaStatus.PROCESSING,
+      status4k: MediaStatus.UNKNOWN,
+      seasons: [
+        new Season({
+          seasonNumber: 1,
+          status: MediaStatus.PROCESSING,
+          status4k: MediaStatus.UNKNOWN,
+        }),
+      ],
+    })
+  );
+
+  // sendToSonarr runs on insert and only bails when no server is configured,
+  // so leftover settings from another test would reach TMDB and fail the request.
+  const settings = getSettings();
+  settings.radarr = [];
+  settings.sonarr = [];
+
+  return requestRepository.save(
+    new MediaRequest({
+      type: MediaType.TV,
+      status: MediaRequestStatus.APPROVED,
+      media,
+      requestedBy,
+      is4k: false,
+      seasons: [
+        new SeasonRequest({
+          seasonNumber: 1,
+          status: MediaRequestStatus.APPROVED,
+        }),
+      ],
+    })
+  );
+}
+
+async function seedInFlightMovie(tmdbId: number): Promise<MediaRequest> {
+  const mediaRepository = getRepository(Media);
+  const requestRepository = getRepository(MediaRequest);
+  const userRepository = getRepository(User);
+
+  const requestedBy = await userRepository.findOneOrFail({ where: { id: 1 } });
+
+  const media = await mediaRepository.save(
+    new Media({
+      tmdbId,
+      mediaType: MediaType.MOVIE,
+      status: MediaStatus.PROCESSING,
+      status4k: MediaStatus.UNKNOWN,
+    })
+  );
+
+  // sendToRadarr runs on insert and only bails when no server is configured,
+  // so leftover settings from another test would reach TMDB and fail the request.
+  const settings = getSettings();
+  settings.radarr = [];
+  settings.sonarr = [];
+
+  return requestRepository.save(
+    new MediaRequest({
+      type: MediaType.MOVIE,
+      status: MediaRequestStatus.APPROVED,
+      media,
+      requestedBy,
+      is4k: false,
+    })
+  );
+}
+
 describe('BaseScanner', () => {
-  setupTestDb();
+  describe('declineRequestsOnStatusReset gate', () => {
+    it('leaves the request alone for a scanner that has not opted in', async () => {
+      const requestRepository = getRepository(MediaRequest);
+      const request = await seedInFlightShow(7001);
 
-  it('creates one media row when two scanners add the same new movie at once', async () => {
-    const plexScanner = new TestScanner('Plex Scan');
-    const jellyfinScanner = new TestScanner('Jellyfin Sync');
+      await new HarnessScanner().scanShow(7001, LIBRARY_HAS_NO_EPISODES);
 
-    await Promise.all([
-      plexScanner.addMovie(603, { ratingKey: 'plex-603' }),
-      jellyfinScanner.addMovie(603, { jellyfinMediaId: 'jellyfin-603' }),
-    ]);
+      const updated = await requestRepository.findOneOrFail({
+        where: { id: request.id },
+      });
 
-    const rows = await getRepository(Media).find({
-      where: { tmdbId: 603, mediaType: MediaType.MOVIE },
+      assert.strictEqual(updated.status, MediaRequestStatus.APPROVED);
     });
 
-    assert.equal(rows.length, 1, 'expected a single media row');
-    assert.equal(rows[0].ratingKey, 'plex-603');
-    assert.equal(rows[0].jellyfinMediaId, 'jellyfin-603');
-  });
+    it('declines the request for a scanner that has opted in', async () => {
+      const requestRepository = getRepository(MediaRequest);
+      const request = await seedInFlightShow(7002);
 
-  it('creates one media row when two scanners add the same new show at once', async () => {
-    const plexScanner = new TestScanner('Plex Scan');
-    const jellyfinScanner = new TestScanner('Jellyfin Sync');
+      await new HarnessScanner(true).scanShow(7002, LIBRARY_HAS_NO_EPISODES);
 
-    // Shows also carry a unique tvdbId, so without serialising the scanners
-    // the second insert fails outright instead of creating a duplicate.
-    await Promise.all([
-      plexScanner.addShow(1399, 121361, { ratingKey: 'plex-1399' }),
-      jellyfinScanner.addShow(1399, 121361, {
-        jellyfinMediaId: 'jellyfin-1399',
-      }),
-    ]);
+      const updated = await requestRepository.findOneOrFail({
+        where: { id: request.id },
+      });
 
-    const rows = await getRepository(Media).find({
-      where: { tmdbId: 1399, mediaType: MediaType.TV },
+      assert.strictEqual(updated.status, MediaRequestStatus.DECLINED);
     });
 
-    assert.equal(rows.length, 1, 'expected a single media row');
-    assert.equal(rows[0].ratingKey, 'plex-1399');
-    assert.equal(rows[0].jellyfinMediaId, 'jellyfin-1399');
-  });
+    it('resets a movie in the loop for a scanner that has not opted in', async () => {
+      const mediaRepository = getRepository(Media);
+      const requestRepository = getRepository(MediaRequest);
+      const request = await seedInFlightMovie(7003);
 
-  it('does not hold up different titles behind each other', async () => {
-    const plexScanner = new TestScanner('Plex Scan');
-    const jellyfinScanner = new TestScanner('Jellyfin Sync');
+      await new HarnessScanner().scanAbandonedMovie(7003);
 
-    await Promise.all([
-      plexScanner.addMovie(603, { ratingKey: 'plex-603' }),
-      jellyfinScanner.addMovie(604, { jellyfinMediaId: 'jellyfin-604' }),
-    ]);
+      const media = await mediaRepository.findOneOrFail({
+        where: { tmdbId: 7003 },
+      });
+      const updated = await requestRepository.findOneOrFail({
+        where: { id: request.id },
+      });
 
-    const count = await getRepository(Media).count({
-      where: { mediaType: MediaType.MOVIE },
+      assert.strictEqual(media.status, MediaStatus.UNKNOWN);
+      assert.strictEqual(updated.status, MediaRequestStatus.APPROVED);
     });
 
-    assert.equal(count, 2);
+    it('defers a movie reset to the resolve pass for a scanner that has opted in', async () => {
+      const mediaRepository = getRepository(Media);
+      const requestRepository = getRepository(MediaRequest);
+      const request = await seedInFlightMovie(7004);
+      const scanner = new HarnessScanner(true);
+
+      await scanner.scanAbandonedMovie(7004);
+
+      const duringScan = await mediaRepository.findOneOrFail({
+        where: { tmdbId: 7004 },
+      });
+      assert.strictEqual(duringScan.status, MediaStatus.PROCESSING);
+
+      await scanner.resolve();
+
+      const afterResolve = await mediaRepository.findOneOrFail({
+        where: { tmdbId: 7004 },
+      });
+      const updated = await requestRepository.findOneOrFail({
+        where: { id: request.id },
+      });
+
+      assert.strictEqual(afterResolve.status, MediaStatus.UNKNOWN);
+      assert.strictEqual(updated.status, MediaRequestStatus.DECLINED);
+    });
   });
 });
