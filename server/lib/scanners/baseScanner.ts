@@ -783,34 +783,36 @@ class BaseScanner<T> {
     const mediaRepository = getRepository(Media);
 
     for (const { mediaId, is4k } of this.statusResetCandidates.values()) {
-      const media = await mediaRepository.findOne({
-        where: { id: mediaId },
-        relations: { requests: true },
+      await this.withMediaLock(mediaId, async () => {
+        const media = await mediaRepository.findOne({
+          where: { id: mediaId },
+          relations: { requests: true },
+        });
+
+        if (!media || !isAbandoned(media, is4k)) {
+          return;
+        }
+
+        const statusField = is4k ? 'status4k' : 'status';
+
+        // A show's status only ever changes through its season rollup.
+        if (
+          media.mediaType === MediaType.MOVIE &&
+          media[statusField] === MediaStatus.PROCESSING
+        ) {
+          media[statusField] = MediaStatus.UNKNOWN;
+          await mediaRepository.save(media);
+        } else if (media[statusField] !== MediaStatus.UNKNOWN) {
+          // Something finished or deleted it mid-run; it is no longer ours to reset.
+          return;
+        }
+
+        await this.declineOrphanedRequests(
+          media,
+          is4k,
+          'reset to UNKNOWN after the Sonarr/Radarr entry went unmonitored with nothing downloaded'
+        );
       });
-
-      if (!media || !isAbandoned(media, is4k)) {
-        continue;
-      }
-
-      const statusField = is4k ? 'status4k' : 'status';
-
-      // A show's status only ever changes through its season rollup.
-      if (
-        media.mediaType === MediaType.MOVIE &&
-        media[statusField] === MediaStatus.PROCESSING
-      ) {
-        media[statusField] = MediaStatus.UNKNOWN;
-        await mediaRepository.save(media);
-      } else if (media[statusField] !== MediaStatus.UNKNOWN) {
-        // Something finished or deleted it mid-run; it is no longer ours to reset.
-        continue;
-      }
-
-      await this.declineOrphanedRequests(
-        media,
-        is4k,
-        'reset to UNKNOWN after the Sonarr/Radarr entry went unmonitored with nothing downloaded'
-      );
     }
 
     const requestRepository = getRepository(MediaRequest);
@@ -822,98 +824,121 @@ class BaseScanner<T> {
       seasonNumbers,
       scannedSeasons,
     } of this.seasonResetCandidates.values()) {
-      // Loaded without requests so the save cannot cascade back the season requests removed below.
-      const media = await mediaRepository.findOne({ where: { id: mediaId } });
+      await this.withMediaLock(mediaId, async () => {
+        // Loaded without requests so the save cannot cascade back the season requests removed below.
+        const media = await mediaRepository.findOne({ where: { id: mediaId } });
 
-      if (!media) {
-        continue;
-      }
-
-      const statusField = is4k ? 'status4k' : 'status';
-      const abandoned = new Set<number>();
-      let resetSeason = false;
-
-      for (const season of media.seasons) {
-        if (
-          !seasonNumbers.has(season.seasonNumber) ||
-          !isAbandoned(media, is4k, season.seasonNumber)
-        ) {
-          continue;
+        if (!media) {
+          return;
         }
 
-        if (season[statusField] === MediaStatus.PROCESSING) {
-          season[statusField] = MediaStatus.UNKNOWN;
-          resetSeason = true;
-        } else if (season[statusField] !== MediaStatus.UNKNOWN) {
-          continue;
+        const statusField = is4k ? 'status4k' : 'status';
+        const abandoned = new Set<number>();
+        let resetSeason = false;
+
+        for (const season of media.seasons) {
+          if (
+            !seasonNumbers.has(season.seasonNumber) ||
+            !isAbandoned(media, is4k, season.seasonNumber)
+          ) {
+            continue;
+          }
+
+          if (season[statusField] === MediaStatus.PROCESSING) {
+            season[statusField] = MediaStatus.UNKNOWN;
+            resetSeason = true;
+          } else if (season[statusField] !== MediaStatus.UNKNOWN) {
+            continue;
+          }
+
+          abandoned.add(season.seasonNumber);
         }
 
-        abandoned.add(season.seasonNumber);
-      }
+        if (abandoned.size === 0) {
+          return;
+        }
 
-      if (abandoned.size === 0) {
-        continue;
-      }
+        if (resetSeason) {
+          media[statusField] = this.rollUpShowStatus(
+            media,
+            scannedSeasons,
+            is4k
+          );
+        }
 
-      if (resetSeason) {
-        media[statusField] = this.rollUpShowStatus(media, scannedSeasons, is4k);
-      }
+        const requests = await requestRepository.find({
+          where: {
+            media: { id: mediaId },
+            is4k,
+            status: MediaRequestStatus.APPROVED,
+          },
+        });
+        const affected = requests.filter((request) =>
+          request.seasons.some((s) => abandoned.has(s.seasonNumber))
+        );
+        const toDecline =
+          media[statusField] === MediaStatus.UNKNOWN
+            ? requests
+            : affected.filter((request) =>
+                request.seasons.every((s) => abandoned.has(s.seasonNumber))
+              );
 
-      const requests = await requestRepository.find({
-        where: {
-          media: { id: mediaId },
-          is4k,
-          status: MediaRequestStatus.APPROVED,
-        },
+        for (const request of affected) {
+          if (toDecline.includes(request)) {
+            continue;
+          }
+
+          const removed = request.seasons.filter((s) =>
+            abandoned.has(s.seasonNumber)
+          );
+          const remaining = request.seasons.filter(
+            (s) => !abandoned.has(s.seasonNumber)
+          );
+          const removedNumbers = removed.map((s) => s.seasonNumber).join(', ');
+
+          await seasonRequestRepository.remove(removed);
+          this.log(
+            `Removed season(s) ${removedNumbers} from series request ${request.id} for ${media.tmdbId} after Sonarr stopped pursuing them.`,
+            'info'
+          );
+
+          // MediaSubscriber only runs when a media column changes, so nothing else would complete it.
+          if (
+            remaining.every((s) => s.status === MediaRequestStatus.COMPLETED)
+          ) {
+            request.seasons = remaining;
+            request.status = MediaRequestStatus.COMPLETED;
+            await requestRepository.save(request);
+          }
+        }
+
+        if (resetSeason) {
+          await mediaRepository.save(media);
+        }
+
+        for (const request of toDecline) {
+          await this.declineRequest(
+            media,
+            request,
+            'after Sonarr stopped pursuing its requested seasons'
+          );
+        }
       });
-      const affected = requests.filter((request) =>
-        request.seasons.some((s) => abandoned.has(s.seasonNumber))
-      );
-      const toDecline =
-        media[statusField] === MediaStatus.UNKNOWN
-          ? requests
-          : affected.filter((request) =>
-              request.seasons.every((s) => abandoned.has(s.seasonNumber))
-            );
+    }
+  }
 
-      for (const request of affected) {
-        if (toDecline.includes(request)) {
-          continue;
-        }
+  // Resets write what processMovie and processShow write, so they take the same
+  // lock, and callers read the media again once they hold it.
+  private async withMediaLock(
+    mediaId: number,
+    callback: () => Promise<void>
+  ): Promise<void> {
+    const media = await getRepository(Media).findOne({
+      where: { id: mediaId },
+    });
 
-        const removed = request.seasons.filter((s) =>
-          abandoned.has(s.seasonNumber)
-        );
-        const remaining = request.seasons.filter(
-          (s) => !abandoned.has(s.seasonNumber)
-        );
-        const removedNumbers = removed.map((s) => s.seasonNumber).join(', ');
-
-        await seasonRequestRepository.remove(removed);
-        this.log(
-          `Removed season(s) ${removedNumbers} from series request ${request.id} for ${media.tmdbId} after Sonarr stopped pursuing them.`,
-          'info'
-        );
-
-        // MediaSubscriber only runs when a media column changes, so nothing else would complete it.
-        if (remaining.every((s) => s.status === MediaRequestStatus.COMPLETED)) {
-          request.seasons = remaining;
-          request.status = MediaRequestStatus.COMPLETED;
-          await requestRepository.save(request);
-        }
-      }
-
-      if (resetSeason) {
-        await mediaRepository.save(media);
-      }
-
-      for (const request of toDecline) {
-        await this.declineRequest(
-          media,
-          request,
-          'after Sonarr stopped pursuing its requested seasons'
-        );
-      }
+    if (media) {
+      await mediaLock.dispatch(`${media.mediaType}:${media.tmdbId}`, callback);
     }
   }
 
