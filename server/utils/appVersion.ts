@@ -9,7 +9,7 @@ if (existsSync(COMMIT_TAG_PATH)) {
   // The Docker image always writes committag.json, but leaves the tag empty
   // when the image was built without the COMMIT_TAG build argument. Keep the
   // 'local' default in that case so this matches what the client falls back to
-  // in next.config.ts; otherwise the two disagree and the client shows the
+  // in next.config.mjs; otherwise the two disagree and the client shows the
   // "app updated, please reload" prompt on every page load.
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   commitTag = require(COMMIT_TAG_PATH).commitTag || 'local';
