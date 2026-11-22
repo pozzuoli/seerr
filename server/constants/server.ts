@@ -41,4 +41,5 @@ export const resolveEnabledMediaServers = ({
 export enum ServerType {
   JELLYFIN = 'Jellyfin',
   EMBY = 'Emby',
+  PLEX = 'Plex',
 }

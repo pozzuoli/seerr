@@ -31,13 +31,12 @@ interface ScheduledJob {
 export const scheduledJobs: ScheduledJob[] = [];
 
 export const startJobs = (): void => {
-  const jobs = getSettings().jobs;
+  // Reruns whenever a media server is set, connected or disconnected, so clear
+  // the previous schedule to avoid running each job twice.
+  scheduledJobs.forEach((scheduledJob) => scheduledJob.job.cancel());
+  scheduledJobs.length = 0;
 
-  // Jobs are rescheduled whenever a media server is connected or disconnected,
-  // so clear any previous schedule to avoid running each job twice.
-  for (const scheduledJob of scheduledJobs.splice(0)) {
-    scheduledJob.job.cancel();
-  }
+  const jobs = getSettings().jobs;
 
   // Plex and Jellyfin/Emby can both be connected, so each block is independent.
   if (isPlexEnabled()) {
@@ -242,6 +241,7 @@ export const startJobs = (): void => {
       });
       // Clean TMDB image cache
       ImageProxy.clearCache('tmdb');
+      ImageProxy.clearCache('tvdb');
 
       // Clean users avatar image cache
       ImageProxy.clearCache('avatar');

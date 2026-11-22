@@ -137,8 +137,10 @@ class ExternalAPI {
           .catch((e) => {
             // Nothing awaits this refresh, so an unhandled rejection here could
             // take the process down. The cached copy keeps being served.
-            logger.debug(`Background refresh of ${endpoint} failed`, {
+            logger.warn('Failed to refresh cached response in background', {
               label: 'External API',
+              baseUrl: e.config?.baseURL,
+              endpoint,
               errorMessage: e.message,
             });
           });

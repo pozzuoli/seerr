@@ -245,7 +245,7 @@ const SettingsUsers = () => {
                   </div>
                 </div>
                 <div className="form-row">
-                  <label htmlFor="applicationTitle" className="text-label">
+                  <label htmlFor="movieQuotaLimit" className="text-label">
                     {intl.formatMessage(messages.movieRequestLimitLabel)}
                   </label>
                   <div className="form-input-area">
@@ -260,7 +260,7 @@ const SettingsUsers = () => {
                   </div>
                 </div>
                 <div className="form-row">
-                  <label htmlFor="applicationTitle" className="text-label">
+                  <label htmlFor="tvQuotaLimit" className="text-label">
                     {intl.formatMessage(messages.tvRequestLimitLabel)}
                   </label>
                   <div className="form-input-area">

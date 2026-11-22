@@ -34,7 +34,7 @@ import {
   PencilIcon,
   UserPlusIcon,
 } from '@heroicons/react/24/solid';
-import { MediaServerType } from '@server/constants/server';
+import { MediaServerType, ServerType } from '@server/constants/server';
 import type { UserResultsResponse } from '@server/interfaces/api/userInterfaces';
 import { hasPermission } from '@server/lib/permissions';
 import axios from 'axios';
@@ -904,13 +904,13 @@ const UserList = () => {
                 ) : user.userType === UserType.EMBY ? (
                   <Badge badgeType="success">
                     {intl.formatMessage(messages.mediaServerUser, {
-                      mediaServerName: 'Emby',
+                      mediaServerName: ServerType.EMBY,
                     })}
                   </Badge>
                 ) : user.userType === UserType.JELLYFIN ? (
                   <Badge badgeType="default">
                     {intl.formatMessage(messages.mediaServerUser, {
-                      mediaServerName: 'Jellyfin',
+                      mediaServerName: ServerType.JELLYFIN,
                     })}
                   </Badge>
                 ) : null}

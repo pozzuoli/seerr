@@ -13,7 +13,7 @@ import globalMessages from '@app/i18n/globalMessages';
 import defineMessages from '@app/utils/defineMessages';
 import PlexOAuth from '@app/utils/plex';
 import { TrashIcon } from '@heroicons/react/24/solid';
-import { MediaServerType } from '@server/constants/server';
+import { MediaServerType, ServerType } from '@server/constants/server';
 import axios from 'axios';
 import { useRouter } from 'next/router';
 import { useMemo, useState } from 'react';
@@ -40,14 +40,8 @@ const messages = defineMessages(
 
 const plexOAuth = new PlexOAuth();
 
-enum LinkedAccountType {
-  Plex = 'Plex',
-  Jellyfin = 'Jellyfin',
-  Emby = 'Emby',
-}
-
 type LinkedAccount = {
-  type: LinkedAccountType;
+  type: ServerType;
   username: string;
 };
 
@@ -80,7 +74,7 @@ const UserLinkedAccountsSettings = () => {
     if (!user) return accounts;
     if (user.plexUsername)
       accounts.push({
-        type: LinkedAccountType.Plex,
+        type: ServerType.PLEX,
         username: user.plexUsername,
       });
     if (user.jellyfinUsername) {
@@ -91,7 +85,7 @@ const UserLinkedAccountsSettings = () => {
         : user.userType === UserType.EMBY;
 
       accounts.push({
-        type: isEmby ? LinkedAccountType.Emby : LinkedAccountType.Jellyfin,
+        type: isEmby ? ServerType.EMBY : ServerType.JELLYFIN,
         username: user.jellyfinUsername,
       });
     }
@@ -127,7 +121,7 @@ const UserLinkedAccountsSettings = () => {
 
   const linkable = [
     {
-      name: 'Plex',
+      name: ServerType.PLEX,
       action: () => {
         plexOAuth.preparePopup();
         setTimeout(() => linkPlexAccount(), 1500);
@@ -136,21 +130,21 @@ const UserLinkedAccountsSettings = () => {
       // requires a linked admin account first.
       hide:
         (!plexEnabled && !hasPermission(Permission.ADMIN)) ||
-        accounts.some((a) => a.type === LinkedAccountType.Plex),
+        accounts.some((a) => a.type === ServerType.PLEX),
     },
     {
-      name: 'Jellyfin',
+      name: ServerType.JELLYFIN,
       action: () => setShowJellyfinModal(true),
       hide:
         jellyfinServerType !== MediaServerType.JELLYFIN ||
-        accounts.some((a) => a.type === LinkedAccountType.Jellyfin),
+        accounts.some((a) => a.type === ServerType.JELLYFIN),
     },
     {
-      name: 'Emby',
+      name: ServerType.EMBY,
       action: () => setShowJellyfinModal(true),
       hide:
         jellyfinServerType !== MediaServerType.EMBY ||
-        accounts.some((a) => a.type === LinkedAccountType.Emby),
+        accounts.some((a) => a.type === ServerType.EMBY),
     },
   ].filter((l) => !l.hide);
 
@@ -229,11 +223,11 @@ const UserLinkedAccountsSettings = () => {
               className="flex items-center gap-4 overflow-hidden rounded-lg bg-gray-800/50 px-4 py-5 shadow ring-1 ring-gray-700 sm:p-6"
             >
               <div className="w-12">
-                {acct.type === LinkedAccountType.Plex ? (
+                {acct.type === ServerType.PLEX ? (
                   <div className="flex aspect-square h-full items-center justify-center rounded-full bg-neutral-800">
                     <PlexLogo className="w-9" />
                   </div>
-                ) : acct.type === LinkedAccountType.Emby ? (
+                ) : acct.type === ServerType.EMBY ? (
                   <EmbyLogo />
                 ) : (
                   <JellyfinLogo />
@@ -252,7 +246,7 @@ const UserLinkedAccountsSettings = () => {
                 <ConfirmButton
                   onClick={() => {
                     deleteRequest(
-                      acct.type === LinkedAccountType.Plex ? 'plex' : 'jellyfin'
+                      acct.type === ServerType.PLEX ? 'plex' : 'jellyfin'
                     );
                   }}
                   confirmText={intl.formatMessage(globalMessages.areyousure)}

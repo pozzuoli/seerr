@@ -2,7 +2,7 @@ import QuickConnectModal from '@app/components/Common/QuickConnectModal';
 import useMediaServers from '@app/hooks/useMediaServers';
 import { useUser } from '@app/hooks/useUser';
 import defineMessages from '@app/utils/defineMessages';
-import { MediaServerType } from '@server/constants/server';
+import { MediaServerType, ServerType } from '@server/constants/server';
 import axios from 'axios';
 import { useCallback } from 'react';
 import { useIntl } from 'react-intl';
@@ -35,7 +35,9 @@ const LinkJellyfinQuickConnectModal = ({
   const { user } = useUser();
 
   const mediaServerName =
-    jellyfinServerType === MediaServerType.EMBY ? 'Emby' : 'Jellyfin';
+    jellyfinServerType === MediaServerType.EMBY
+      ? ServerType.EMBY
+      : ServerType.JELLYFIN;
 
   const authenticate = useCallback(
     async (secret: string) => {
